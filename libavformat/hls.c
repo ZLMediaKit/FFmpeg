@@ -215,6 +215,7 @@ static int parse_playlist(HLSContext *c, const char *url,
     char line[1024];
     const char *ptr;
     int close_in = 0;
+    int start_seq_no = -1;
 
     if (!in) {
         AVDictionary *opts = NULL;
@@ -281,7 +282,11 @@ static int parse_playlist(HLSContext *c, const char *url,
                     goto fail;
                 }
             }
-            var->start_seq_no = atoi(ptr);
+            /* Some buggy HLS servers give #EXT-X-MEDIA-SEQUENCE more than once */
+            if (start_seq_no < 0) {
+                start_seq_no = atoi(ptr);
+                var->start_seq_no = atoi(ptr);
+            }
         } else if (av_strstart(line, "#EXT-X-ENDLIST", &ptr)) {
             if (var)
                 var->finished = 1;
