@@ -1164,7 +1164,14 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
         if ((!s->willclose || s->chunksize < 0) &&
             target_end >= 0 && s->off >= target_end)
             return AVERROR_EOF;
-        len = ffurl_read(s->hd, buf, size);
+        len = size;
+        if (s->filesize > 0 && s->filesize != 2147483647) {
+            int64_t unread = s->filesize - s->off;
+            if (len > unread)
+                len = (int)unread;
+        }
+        if (len > 0)
+            len = ffurl_read(s->hd, buf, len);
         if (!len && (!s->willclose || s->chunksize < 0) &&
             target_end >= 0 && s->off < target_end) {
             av_log(h, AV_LOG_ERROR,
