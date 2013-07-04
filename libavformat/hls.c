@@ -906,7 +906,7 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
         /* Locate the segment that contains the target timestamp */
         for (j = 0; j < pls->n_segments; j++) {
             if (timestamp >= pos &&
-                timestamp < pos + pls->segments[j]->duration) {
+                (timestamp < pos + pls->segments[j]->duration || j + 1 == pls->n_segments)) {
                 pls->cur_seq_no = pls->start_seq_no + j;
                 ret = 0;
                 break;
