@@ -863,6 +863,7 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
 {
     HLSContext *c = s->priv_data;
     int i, j, ret;
+    int64_t start_time = 0;
 
     if ((flags & AVSEEK_FLAG_BYTE) || !c->variants[0]->playlists[0]->finished)
         return AVERROR(ENOSYS);
@@ -877,7 +878,9 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
                                s->streams[stream_index]->time_base.den :
                                AV_TIME_BASE, flags & AVSEEK_FLAG_BACKWARD ?
                                AV_ROUND_DOWN : AV_ROUND_UP);
-    if (s->duration < c->seek_timestamp) {
+    if (s->start_time > 0)
+        start_time = s->start_time;
+    if (start_time + s->duration < c->seek_timestamp) {
         c->seek_timestamp = AV_NOPTS_VALUE;
         return AVERROR(EIO);
     }
