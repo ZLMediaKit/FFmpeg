@@ -669,6 +669,7 @@ static int http_connect(URLContext *h, const char *path, const char *local_path,
     char headers[4096] = "";
     char *authstr = NULL, *proxyauthstr = NULL;
     int64_t off = s->off;
+    int64_t filesize = s->filesize;
     int len = 0;
     const char *method;
     int send_expect_100 = 0;
@@ -809,6 +810,15 @@ static int http_connect(URLContext *h, const char *path, const char *local_path,
     err = http_read_header(h, new_location);
     if (err < 0)
         return err;
+
+    /* Some buggy servers may missing 'Content-Range' header for range request */
+    if (off > 0 && s->off <= 0 && (off + s->filesize == filesize)) {
+        av_log(NULL, AV_LOG_WARNING,
+               "try to fix missing 'Content-Range' at server side (%"PRId64",%"PRId64") => (%"PRId64",%"PRId64")",
+               s->off, s->filesize, off, filesize);
+        s->off = off;
+        s->filesize = filesize;
+    }
 
     return (off == s->off) ? 0 : -1;
 }
