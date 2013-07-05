@@ -56,6 +56,7 @@ typedef struct {
     int icy_data_read;      ///< how much data was read since last ICY metadata packet
     int icy_metaint;        ///< after how many bytes of read data a new metadata packet will be found
     char location[MAX_URL_SIZE];
+    char *redirected_location;
     HTTPAuthState auth_state;
     HTTPAuthState proxy_auth_state;
     char *headers;
@@ -103,6 +104,7 @@ static const AVOption options[] = {
 {"none", "No auth method set, autodetect", 0, AV_OPT_TYPE_CONST, {.i64 = HTTP_AUTH_NONE}, 0, 0, D|E, "auth_type" },
 {"basic", "HTTP basic authentication", 0, AV_OPT_TYPE_CONST, {.i64 = HTTP_AUTH_BASIC}, 0, 0, D|E, "auth_type" },
 {"send_expect_100", "Force sending an Expect: 100-continue header for POST", OFFSET(send_expect_100), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, E, "auth_type" },
+{"redirected-location", "redirected location", OFFSET(redirected_location), AV_OPT_TYPE_STRING, { 0 }, 0, 0, D },
 {NULL}
 };
 #define HTTP_CLASS(flavor)\
@@ -236,6 +238,7 @@ int ff_http_do_new_request(URLContext *h, const char *uri)
     s->off = 0;
     s->icy_data_read = 0;
     av_strlcpy(s->location, uri, sizeof(s->location));
+    av_opt_set(s, "redirected-location", uri, 0);
 
     av_dict_copy(&options, s->chained_options, 0);
     ret = http_open_cnx(h, &options);
@@ -258,6 +261,7 @@ static int http_open(URLContext *h, const char *uri, int flags,
     av_strlcpy(s->location, uri, sizeof(s->location));
     if (options)
         av_dict_copy(&s->chained_options, *options, 0);
+    av_opt_set(s, "redirected-location", uri, 0);
 
     if (s->headers) {
         int len = strlen(s->headers);
@@ -358,6 +362,7 @@ static int process_line(URLContext *h, char *line, int line_count,
         if (!av_strcasecmp(tag, "Location")) {
             ff_make_absolute_url(redirected_location, sizeof(redirected_location), s->location, p);
             av_strlcpy(s->location, redirected_location, sizeof(s->location));
+            av_opt_set(s, "redirected-location", redirected_location, 0);
             *new_location = 1;
         } else if (!av_strcasecmp (tag, "Content-Length") && s->filesize == -1) {
             s->filesize = strtoll(p, NULL, 10);
