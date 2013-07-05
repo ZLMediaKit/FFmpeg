@@ -56,6 +56,7 @@ typedef struct {
     int icy_data_read;      ///< how much data was read since last ICY metadata packet
     int icy_metaint;        ///< after how many bytes of read data a new metadata packet will be found
     char location[MAX_URL_SIZE];
+    char *redirected_location;
     HTTPAuthState auth_state;
     HTTPAuthState proxy_auth_state;
     char *headers;
@@ -99,6 +100,7 @@ static const AVOption options[] = {
 {"icy", "request ICY metadata", OFFSET(icy), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, D },
 {"icy_metadata_headers", "return ICY metadata headers", OFFSET(icy_metadata_headers), AV_OPT_TYPE_STRING, {0}, 0, 0, 0 },
 {"icy_metadata_packet", "return current ICY metadata packet", OFFSET(icy_metadata_packet), AV_OPT_TYPE_STRING, {0}, 0, 0, 0 },
+{"redirected-location", "redirected location", OFFSET(redirected_location), AV_OPT_TYPE_STRING, { 0 }, 0, 0, D },
 {NULL}
 };
 #define HTTP_CLASS(flavor)\
@@ -237,6 +239,7 @@ int ff_http_do_new_request(URLContext *h, const char *uri)
     s->off = 0;
     s->icy_data_read = 0;
     av_strlcpy(s->location, uri, sizeof(s->location));
+    av_opt_set(s, "redirected-location", uri, 0);
 
     return http_open_cnx(h);
 }
@@ -252,6 +255,7 @@ static int http_open(URLContext *h, const char *uri, int flags)
 
     s->filesize = -1;
     av_strlcpy(s->location, uri, sizeof(s->location));
+    av_opt_set(s, "redirected-location", uri, 0);
 
     if (s->headers) {
         int len = strlen(s->headers);
@@ -349,6 +353,7 @@ static int process_line(URLContext *h, char *line, int line_count,
         if (!av_strcasecmp(tag, "Location")) {
             ff_make_absolute_url(redirected_location, sizeof(redirected_location), s->location, p);
             av_strlcpy(s->location, redirected_location, sizeof(s->location));
+            av_opt_set(s, "redirected-location", redirected_location, 0);
             *new_location = 1;
         } else if (!av_strcasecmp (tag, "Content-Length") && s->filesize == -1) {
             s->filesize = strtoll(p, NULL, 10);
