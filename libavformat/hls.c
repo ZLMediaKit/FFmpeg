@@ -105,6 +105,7 @@ typedef struct HLSContext {
     AVIOInterruptCB *interrupt_callback;
     char *user_agent;                    ///< holds HTTP user agent set as an AVOption to the HTTP protocol context
     char *cookies;                       ///< holds HTTP cookie values set in either the initial response or as an AVOption to the HTTP protocol context
+    char location[MAX_URL_SIZE];
 } HLSContext;
 
 static int read_chomp_line(AVIOContext *s, char *buf, int maxlen)
@@ -215,6 +216,7 @@ static int parse_playlist(HLSContext *c, const char *url,
     const char *ptr;
     int close_in = 0;
     int start_seq_no = -1;
+    char *new_location = NULL;    
 
     if (!in) {
         AVDictionary *opts = NULL;
@@ -231,6 +233,14 @@ static int parse_playlist(HLSContext *c, const char *url,
         av_dict_free(&opts);
         if (ret < 0)
             return ret;
+
+        // get redirected location if exists
+        c->location[0] = 0;
+        av_opt_get(in, "redirected-location", 0, (uint8_t**)&new_location);
+        if (new_location && strlen(new_location))
+            av_strlcpy(c->location, new_location, sizeof(c->location));
+
+        av_freep(&new_location);
     }
 
     read_chomp_line(in, line, sizeof(line));
@@ -483,6 +493,7 @@ static int hls_read_header(AVFormatContext *s)
     URLContext *u = (s->flags & AVFMT_FLAG_CUSTOM_IO) ? NULL : s->pb->opaque;
     HLSContext *c = s->priv_data;
     int ret = 0, i, j, stream_offset = 0;
+    char *new_location = NULL;
 
     c->interrupt_callback = &s->interrupt_callback;
 
@@ -499,9 +510,17 @@ static int hls_read_header(AVFormatContext *s)
         av_opt_get(u->priv_data, "cookies", 0, (uint8_t**)&(c->cookies));
         if (c->cookies && !strlen(c->cookies))
             av_freep(&c->cookies);
+
+        // get redirected location if exists
+        av_opt_get(u->priv_data, "redirected-location", 0, (uint8_t**)&new_location);
+        c->location[0] = 0;
+        if (new_location && strlen(new_location))
+            av_strlcpy(c->location, new_location, sizeof(c->location));
+
+        av_freep(&new_location);
     }
 
-    if ((ret = parse_playlist(c, s->filename, NULL, s->pb)) < 0)
+    if ((ret = parse_playlist(c, c->location[0] ? c->location : s->filename, NULL, s->pb)) < 0)
         goto fail;
 
     if (c->n_variants == 0) {
