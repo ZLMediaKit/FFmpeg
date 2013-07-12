@@ -884,6 +884,8 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
         c->seek_timestamp = AV_NOPTS_VALUE;
         return AVERROR(EIO);
     }
+    /* seeking within segment could cause missing key frame */
+    c->seek_timestamp = AV_NOPTS_VALUE;
 
     ret = AVERROR(EIO);
     for (i = 0; i < c->n_playlists; i++) {
