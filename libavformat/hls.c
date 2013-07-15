@@ -57,8 +57,8 @@ enum KeyType {
 };
 
 struct segment {
-    int previous_duration; // in seconds
-    int duration; // in seconds
+    double previous_duration; // in seconds
+    double duration; // in seconds
     char url[MAX_URL_SIZE];
     char key[MAX_URL_SIZE];
     enum KeyType key_type;
@@ -209,7 +209,8 @@ static void handle_key_args(struct key_info *info, const char *key,
 static int parse_playlist(HLSContext *c, const char *url,
                           struct variant *var, AVIOContext *in)
 {
-    int ret = 0, duration = 0, is_segment = 0, is_variant = 0, bandwidth = 0, previous_duration1 = 0, previous_duration = 0;
+    int ret = 0, is_segment = 0, is_variant = 0, bandwidth = 0;
+    double duration = 0, previous_duration1 = 0, previous_duration = 0;
     enum KeyType key_type = KEY_NONE;
     uint8_t iv[16] = "";
     int has_iv = 0;
@@ -305,7 +306,7 @@ static int parse_playlist(HLSContext *c, const char *url,
             previous_duration = previous_duration1;
         } else if (av_strstart(line, "#EXTINF:", &ptr)) {
             is_segment = 1;
-            duration   = atoi(ptr);
+            duration   = atof(ptr);
         } else if (av_strstart(line, "#", NULL)) {
             continue;
         } else if (line[0]) {
@@ -553,7 +554,7 @@ static int hls_read_header(AVFormatContext *s)
     /* If this isn't a live stream, calculate the total duration of the
      * stream. */
     if (c->variants[0]->finished) {
-        int64_t duration = 0;
+        double duration = 0;
         for (i = 0; i < c->variants[0]->n_segments; i++)
             duration += c->variants[0]->segments[i]->duration;
         s->duration = duration * AV_TIME_BASE;
@@ -761,7 +762,7 @@ start:
         pkt->stream_index += v->stream_offset;
         int seq_no = v->cur_seq_no - v->start_seq_no;
         if (seq_no < v->n_segments && s->streams[pkt->stream_index]) {
-          int64_t pred = v->segments[seq_no]->previous_duration / av_q2d(s->streams[pkt->stream_index]->time_base);
+          double pred = v->segments[seq_no]->previous_duration / av_q2d(s->streams[pkt->stream_index]->time_base);
           if ((pkt->dts != AV_NOPTS_VALUE && pkt->dts < pred) ||
               (pkt->pts != AV_NOPTS_VALUE && pkt->pts < pred)) {
               pkt->pts += pred;
@@ -815,7 +816,7 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
     for (i = 0; i < c->n_variants; i++) {
         /* Reset reading */
         struct variant *var = c->variants[i];
-        int64_t pos = c->first_timestamp == AV_NOPTS_VALUE ? 0 :
+        double pos = c->first_timestamp == AV_NOPTS_VALUE ? 0 :
                       av_rescale_rnd(c->first_timestamp, 1, stream_index >= 0 ?
                                s->streams[stream_index]->time_base.den :
                                AV_TIME_BASE, flags & AVSEEK_FLAG_BACKWARD ?
