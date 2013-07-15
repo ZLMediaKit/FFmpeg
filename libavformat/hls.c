@@ -762,8 +762,11 @@ start:
         int seq_no = v->cur_seq_no - v->start_seq_no;
         if (seq_no < v->n_segments && s->streams[pkt->stream_index]) {
           int64_t pred = v->segments[seq_no]->previous_duration / av_q2d(s->streams[pkt->stream_index]->time_base);
-          if (pkt->dts != AV_NOPTS_VALUE && pkt->dts < pred) pkt->dts += pred;
-          if (pkt->pts != AV_NOPTS_VALUE && pkt->pts < pred) pkt->pts += pred;
+          if ((pkt->dts != AV_NOPTS_VALUE && pkt->dts < pred) ||
+              (pkt->pts != AV_NOPTS_VALUE && pkt->pts < pred)) {
+              pkt->pts += pred;
+              pkt->dts += pred;
+          }
         }
         reset_packet(&v->pkt);
         return 0;
