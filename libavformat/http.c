@@ -29,6 +29,10 @@
 #include "url.h"
 #include "libavutil/opt.h"
 
+#if CONFIG_ZLIB
+#include <zlib.h>
+#endif
+
 /* XXX: POST protocol is not completely implemented because ffmpeg uses
    only a subset of it. */
 
@@ -71,6 +75,12 @@ typedef struct {
     int icy;
     char *icy_metadata_headers;
     char *icy_metadata_packet;
+    int compressed;
+    struct
+    {
+        z_stream   stream;
+        uint8_t   *buffer;
+    } inflate;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -401,6 +411,22 @@ static int process_line(URLContext *h, char *line, int line_count,
                 return AVERROR(ENOMEM);
             av_freep(&s->icy_metadata_headers);
             s->icy_metadata_headers = buf;
+        } else if (!av_strcasecmp (tag, "Content-Encoding")) {
+            if (!strcasecmp(p, "gzip") || !strcasecmp(p, "deflate" )) {
+                s->compressed = 1;
+#if CONFIG_ZLIB
+                inflateEnd(&s->inflate.stream);
+                if (inflateInit2(&s->inflate.stream, 32 + 15 ) != Z_OK)
+                    av_log(NULL, AV_LOG_WARNING, "Error during zlib initialisation: %s",
+                           s->inflate.stream.msg);
+                if (zlibCompileFlags() & (1 << 17))
+                    av_log(NULL, AV_LOG_WARNING, "Your zlib was compiled without gzip support.");
+#else
+                av_log(NULL, AV_LOG_WARNING, "Compressed(%s) content, need zlib support", p);
+#endif
+            }
+            else
+                av_log(NULL, AV_LOG_WARNING, "Unknown content coding: %s", p );
         }
     }
     return 1;
@@ -707,6 +733,35 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
     return len;
 }
 
+#if CONFIG_ZLIB
+#define DECOMPRESS_BUF_SIZE (256 * 1024)
+static int http_buf_read_compressed(URLContext *h, uint8_t *buf, int size)
+{
+    HTTPContext *s = h->priv_data;
+    int ret;
+
+    if (!s->inflate.buffer)
+        s->inflate.buffer = av_malloc(DECOMPRESS_BUF_SIZE);
+
+    if (s->inflate.stream.avail_in == 0) {
+        int read = http_buf_read(h, s->inflate.buffer, DECOMPRESS_BUF_SIZE);
+        if( read <= 0 )
+            return read;
+        s->inflate.stream.next_in  = s->inflate.buffer;
+        s->inflate.stream.avail_in = read;
+    }
+
+    s->inflate.stream.avail_out = size;
+    s->inflate.stream.next_out  = buf;
+
+    ret = inflate( &s->inflate.stream, Z_SYNC_FLUSH );
+    if (ret != Z_OK && ret != Z_STREAM_END)
+        av_log(NULL, AV_LOG_WARNING, "inflate return value: %d, %s", ret, s->inflate.stream.msg);
+
+    return size - s->inflate.stream.avail_out;
+}
+#endif
+
 static int http_read(URLContext *h, uint8_t *buf, int size)
 {
     HTTPContext *s = h->priv_data;
@@ -768,6 +823,10 @@ static int http_read(URLContext *h, uint8_t *buf, int size)
         }
         size = FFMIN(size, remaining);
     }
+#if CONFIG_ZLIB
+    if (s->compressed)
+        return http_buf_read_compressed(h, buf, size);
+#endif
     return http_buf_read(h, buf, size);
 }
 
@@ -818,6 +877,12 @@ static int http_close(URLContext *h)
 {
     int ret = 0;
     HTTPContext *s = h->priv_data;
+
+#ifdef CONFIG_ZLIB
+    inflateEnd(&s->inflate.stream);
+    if (s->inflate.buffer)
+        av_freep(&s->inflate.buffer);
+#endif
 
     if (!s->end_chunked_post) {
         /* Close the write direction by sending the end of chunked encoding. */
