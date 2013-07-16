@@ -612,6 +612,8 @@ static int hls_read_header(AVFormatContext *s)
             goto fail;
         snprintf(bitrate_str, sizeof(bitrate_str), "%d", v->bandwidth);
 
+        s->iformat->flags |= (in_fmt->flags & AVFMT_TS_DISCONT);
+
         /* Create new AVprogram for variant i */
         program = av_new_program(s, i);
         if (!program)
