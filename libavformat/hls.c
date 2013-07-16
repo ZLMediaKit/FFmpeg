@@ -371,8 +371,17 @@ static int open_input(HLSContext *c, struct variant *var)
     av_dict_set(&opts, "seekable", "0", 0);
 
     if (seg->key_type == KEY_NONE) {
-        ret = ffurl_open(&var->input, seg->url, AVIO_FLAG_READ,
-                          &var->parent->interrupt_callback, &opts);
+        for (int i = 0; i < 3; ++i) {
+            if (ff_check_interrupt(&var->parent->interrupt_callback))
+                return AVERROR_EXIT;
+
+            ret = ffurl_open(&var->input, seg->url, AVIO_FLAG_READ,
+                             &var->parent->interrupt_callback, &opts);
+            if (ret == 0)
+                break;
+
+            av_log(NULL, AV_LOG_ERROR, "failed to open segment, retry...");
+        }
         goto cleanup;
     } else if (seg->key_type == KEY_AES_128) {
         char iv[33], key[33], url[MAX_URL_SIZE];
