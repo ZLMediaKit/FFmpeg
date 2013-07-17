@@ -33,14 +33,14 @@
 #include "url.h"
 #include <stdarg.h>
 
-#define IO_BUFFER_SIZE 32768
+#define IO_BUFFER_SIZE (32768 * 2)
 
 /**
  * Do seeks within this distance ahead of the current buffer by skipping
  * data instead of calling the protocol seek function, for seekable
  * protocols.
  */
-#define SHORT_SEEK_THRESHOLD 4096
+#define SHORT_SEEK_THRESHOLD (4096 * 8)
 
 static void *ffio_url_child_next(void *obj, void *prev)
 {
