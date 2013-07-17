@@ -90,6 +90,8 @@ struct playlist {
 
     char key_url[MAX_URL_SIZE];
     uint8_t key[16];
+
+    int invalid;
 };
 
 struct variant {
@@ -114,6 +116,7 @@ typedef struct HLSContext {
     char *user_agent;                    ///< holds HTTP user agent set as an AVOption to the HTTP protocol context
     char *cookies;                       ///< holds HTTP cookie values set in either the initial response or as an AVOption to the HTTP protocol context
     char *headers;                       ///< holds HTTP headers set as an AVOption to the HTTP protocol context
+    int first_valid_playlist;
 } HLSContext;
 
 static int read_chomp_line(AVIOContext *s, char *buf, int maxlen)
@@ -597,14 +600,26 @@ static int hls_read_header(AVFormatContext *s)
     /* If the playlist only contained playlists (Master Playlist),
      * parse each individual playlist. */
     if (c->n_playlists > 1 || c->playlists[0]->n_segments == 0) {
+        c->first_valid_playlist = -1;
+        ret = 0;
         for (i = 0; i < c->n_playlists; i++) {
             struct playlist *pls = c->playlists[i];
-            if ((ret = parse_playlist(c, pls->url, pls, NULL)) < 0)
-                goto fail;
+            if ((ret = parse_playlist(c, pls->url, pls, NULL)) < 0) {
+                pls->invalid = 1;
+                continue;
+            }
+            pls->invalid = 0;
+            if (c->first_valid_playlist < 0)
+                c->first_valid_playlist = i;
+        }
+
+        if (c->first_valid_playlist < 0) {
+            ret = ret ? ret : AVERROR_INVALIDDATA;
+            goto fail;
         }
     }
 
-    if (c->variants[0]->playlists[0]->n_segments == 0) {
+    if (c->variants[0]->playlists[c->first_valid_playlist]->n_segments == 0) {
         av_log(NULL, AV_LOG_WARNING, "Empty playlist\n");
         ret = AVERROR_EOF;
         goto fail;
@@ -612,10 +627,10 @@ static int hls_read_header(AVFormatContext *s)
 
     /* If this isn't a live stream, calculate the total duration of the
      * stream. */
-    if (c->variants[0]->playlists[0]->finished) {
+    if (c->variants[0]->playlists[c->first_valid_playlist]->finished) {
         int64_t duration = 0;
-        for (i = 0; i < c->variants[0]->playlists[0]->n_segments; i++)
-            duration += c->variants[0]->playlists[0]->segments[i]->duration;
+        for (i = 0; i < c->variants[0]->playlists[c->first_valid_playlist]->n_segments; i++)
+            duration += c->variants[0]->playlists[c->first_valid_playlist]->segments[i]->duration;
         s->duration = duration;
     }
 
@@ -777,7 +792,7 @@ start:
         struct playlist *pls = c->playlists[i];
         /* Make sure we've got one buffered packet from each open playlist
          * stream */
-        if (pls->needed && !pls->pkt.data) {
+        if (!pls->invalid && pls->needed && !pls->pkt.data) {
             while (1) {
                 int64_t ts_diff;
                 AVStream *st;
@@ -874,7 +889,7 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
     int i, j, ret;
     int64_t start_time = 0;
 
-    if ((flags & AVSEEK_FLAG_BYTE) || !c->variants[0]->playlists[0]->finished)
+    if ((flags & AVSEEK_FLAG_BYTE) || !c->variants[0]->playlists[c->first_valid_playlist]->finished)
         return AVERROR(ENOSYS);
 
     c->seek_flags     = flags;
@@ -902,6 +917,8 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
         struct playlist *pls = c->playlists[i];
         int64_t pos = c->first_timestamp == AV_NOPTS_VALUE ?
                       0 : c->first_timestamp;
+        if (pls->invalid)
+            continue;
         if (pls->input) {
             ffurl_close(pls->input);
             pls->input = NULL;
