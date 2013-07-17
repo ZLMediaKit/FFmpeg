@@ -93,6 +93,8 @@ struct variant {
 
     char key_url[MAX_URL_SIZE];
     uint8_t key[16];
+
+    int invalid;
 };
 
 typedef struct HLSContext {
@@ -108,6 +110,7 @@ typedef struct HLSContext {
     char *user_agent;                    ///< holds HTTP user agent set as an AVOption to the HTTP protocol context
     char *cookies;                       ///< holds HTTP cookie values set in either the initial response or as an AVOption to the HTTP protocol context
     char location[MAX_URL_SIZE];
+    int first_valid_variant;
 } HLSContext;
 
 static int read_chomp_line(AVIOContext *s, char *buf, int maxlen)
@@ -547,14 +550,26 @@ static int hls_read_header(AVFormatContext *s)
     /* If the playlist only contained variants, parse each individual
      * variant playlist. */
     if (c->n_variants > 1 || c->variants[0]->n_segments == 0) {
+        c->first_valid_variant = -1;
+        ret = 0;
         for (i = 0; i < c->n_variants; i++) {
             struct variant *v = c->variants[i];
-            if ((ret = parse_playlist(c, v->url, v, NULL)) < 0)
-                goto fail;
+            if ((ret = parse_playlist(c, v->url, v, NULL)) < 0) {
+                v->invalid = 1;
+                continue;
+            }
+            v->invalid = 0;
+            if (c->first_valid_variant < 0)
+                c->first_valid_variant = i;
+        }
+
+        if (c->first_valid_variant < 0) {
+            ret = ret ? ret : AVERROR_INVALIDDATA;
+            goto fail;
         }
     }
 
-    if (c->variants[0]->n_segments == 0) {
+    if (c->variants[c->first_valid_variant]->n_segments == 0) {
         av_log(NULL, AV_LOG_WARNING, "Empty playlist\n");
         ret = AVERROR_EOF;
         goto fail;
@@ -562,10 +577,10 @@ static int hls_read_header(AVFormatContext *s)
 
     /* If this isn't a live stream, calculate the total duration of the
      * stream. */
-    if (c->variants[0]->finished) {
+    if (c->variants[c->first_valid_variant]->finished) {
         double duration = 0;
-        for (i = 0; i < c->variants[0]->n_segments; i++)
-            duration += c->variants[0]->segments[i]->duration;
+        for (i = 0; i < c->variants[c->first_valid_variant]->n_segments; i++)
+            duration += c->variants[c->first_valid_variant]->segments[i]->duration;
         s->duration = duration * AV_TIME_BASE;
     }
 
@@ -709,7 +724,7 @@ start:
         struct variant *var = c->variants[i];
         /* Make sure we've got one buffered packet from each open variant
          * stream */
-        if (var->needed && !var->pkt.data) {
+        if (!var->invalid && var->needed && !var->pkt.data) {
             while (1) {
                 int64_t ts_diff;
                 AVStream *st;
@@ -801,7 +816,7 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
     int i, j, ret;
     int64_t start_time = 0;
 
-    if ((flags & AVSEEK_FLAG_BYTE) || !c->variants[0]->finished)
+    if ((flags & AVSEEK_FLAG_BYTE) || !c->variants[c->first_valid_variant]->finished)
         return AVERROR(ENOSYS);
 
     c->seek_flags     = flags;
@@ -827,6 +842,8 @@ static int hls_read_seek(AVFormatContext *s, int stream_index,
     for (i = 0; i < c->n_variants; i++) {
         /* Reset reading */
         struct variant *var = c->variants[i];
+        if (var->invalid)
+            continue;
         double pos = c->first_timestamp == AV_NOPTS_VALUE ? 0 :
                       av_rescale_rnd(c->first_timestamp, 1, stream_index >= 0 ?
                                s->streams[stream_index]->time_base.den :
