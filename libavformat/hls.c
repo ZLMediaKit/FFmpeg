@@ -1717,4 +1717,5 @@ AVInputFormat ff_hls_demuxer = {
     .read_packet    = hls_read_packet,
     .read_close     = hls_close,
     .read_seek      = hls_read_seek,
+    .flags          = AVFMT_TS_DISCONT,
 };
