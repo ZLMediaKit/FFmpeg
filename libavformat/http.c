@@ -57,6 +57,7 @@ typedef struct {
     int icy_metaint;        ///< after how many bytes of read data a new metadata packet will be found
     char location[MAX_URL_SIZE];
     char *redirected_location;
+    int detect_range_support;
     HTTPAuthState auth_state;
     HTTPAuthState proxy_auth_state;
     char *headers;
@@ -101,6 +102,7 @@ static const AVOption options[] = {
 {"icy_metadata_headers", "return ICY metadata headers", OFFSET(icy_metadata_headers), AV_OPT_TYPE_STRING, {0}, 0, 0, 0 },
 {"icy_metadata_packet", "return current ICY metadata packet", OFFSET(icy_metadata_packet), AV_OPT_TYPE_STRING, {0}, 0, 0, 0 },
 {"redirected-location", "redirected location", OFFSET(redirected_location), AV_OPT_TYPE_STRING, { 0 }, 0, 0, D },
+{"http-detect-range-support", "audo detect http range support", OFFSET(detect_range_support), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 1, D },
 {NULL}
 };
 #define HTTP_CLASS(flavor)\
@@ -601,9 +603,16 @@ static int http_connect(URLContext *h, const char *path, const char *local_path,
     // Note: we send this on purpose even when s->off is 0 when we're probing,
     // since it allows us to detect more reliably if a (non-conforming)
     // server supports seeking by analysing the reply headers.
-    if (!has_header(s->headers, "\r\nRange: ") && !post && (s->off > 0 || s->seekable == -1))
-        len += av_strlcatf(headers + len, sizeof(headers) - len,
-                           "Range: bytes=%"PRId64"-\r\n", s->off);
+    if (!has_header(s->headers, "\r\nRange: ") && !post && (s->off > 0 || s->seekable == -1)) {
+        av_log(NULL, AV_LOG_ERROR, "detect_range_support: %d", s->detect_range_support);
+        if (s->detect_range_support > 0 || s->off > 0) {
+            len += av_strlcatf(headers + len, sizeof(headers) - len,
+                               "Range: bytes=%"PRId64"-\r\n", s->off);
+        } else if (s->seekable == -1) {
+            s->seekable = 1; // some video servers do not accept "Range" at all
+            h->is_streamed = 0;
+        }
+    }
 
     if (!has_header(s->headers, "\r\nConnection: ")) {
         if (s->multiple_requests) {
