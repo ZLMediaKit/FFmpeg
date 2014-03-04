@@ -39,6 +39,7 @@ typedef struct {
     AVFormatContext *avf;
     int safe;
     int seekable;
+    int error;
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -128,27 +129,32 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
 {
     ConcatContext *cat = avf->priv_data;
     ConcatFile *file = &cat->files[fileno];
+    AVFormatContext *new_avf = NULL;
     int ret;
 
-    if (cat->avf)
-        avformat_close_input(&cat->avf);
-
-    cat->avf = avformat_alloc_context();
-    if (!cat->avf)
+    new_avf = avformat_alloc_context();
+    if (!new_avf)
         return AVERROR(ENOMEM);
 
-    cat->avf->interrupt_callback = avf->interrupt_callback;
-    if ((ret = avformat_open_input(&cat->avf, file->url, NULL, NULL)) < 0 ||
-        (ret = avformat_find_stream_info(cat->avf, NULL)) < 0) {
+    new_avf->interrupt_callback = avf->interrupt_callback;
+    if ((ret = avformat_open_input(&new_avf, file->url, NULL, NULL)) < 0 ||
+        (ret = avformat_find_stream_info(new_avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
-        avformat_close_input(&cat->avf);
+        avformat_close_input(&new_avf);
         return ret;
     }
-    cat->cur_file = file;
-    if (file->start_time == AV_NOPTS_VALUE)
-        file->start_time = !fileno ? 0 :
-                           cat->files[fileno - 1].start_time +
-                           cat->files[fileno - 1].duration;
+
+    if (new_avf) {
+        if (cat->avf)
+            avformat_close_input(&cat->avf);
+
+        cat->avf      = new_avf;
+        cat->cur_file = file;
+        if (file->start_time == AV_NOPTS_VALUE)
+            file->start_time = !fileno ? 0 :
+                               cat->files[fileno - 1].start_time +
+                               cat->files[fileno - 1].duration;
+    }
     return 0;
 }
 
@@ -275,16 +281,34 @@ static int open_next_file(AVFormatContext *avf)
     return open_file(avf, fileno);
 }
 
+#define CONCAT_MAX_OPEN_TRY 3
 static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
 {
     ConcatContext *cat = avf->priv_data;
     int ret;
+    int try_counter = 0;
     int64_t delta;
 
+    if (cat->error) {
+        ret = AVERROR_EOF;
+        goto fail;
+    }
+
     while (1) {
-        if ((ret = av_read_frame(cat->avf, pkt)) != AVERROR_EOF ||
-            (ret = open_next_file(avf)) < 0)
+        if ((ret = av_read_frame(cat->avf, pkt)) != AVERROR_EOF)
             break;
+        if ((ret = open_next_file(avf)) < 0) {
+            ++try_counter;
+            if (try_counter > CONCAT_MAX_OPEN_TRY) {
+                cat->error = ret;
+                if (avf->pb)
+                    avf->pb->error = ret;
+                ret = AVERROR_EOF;
+                goto fail;
+            }
+
+            av_log(avf, AV_LOG_WARNING, "open_next_file() failed (%d)\n", try_counter);
+        }
     }
     if (ret < 0)
         return ret;
@@ -296,6 +320,7 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
         pkt->pts += delta;
     if (pkt->dts != AV_NOPTS_VALUE)
         pkt->dts += delta;
+fail:
     return ret;
 }
 
