@@ -56,6 +56,7 @@ typedef struct {
     int seekable;
     ConcatMatchMode stream_match_mode;
     unsigned auto_convert;
+    int error;
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -279,33 +280,38 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
 {
     ConcatContext *cat = avf->priv_data;
     ConcatFile *file = &cat->files[fileno];
+    AVFormatContext *new_avf = NULL;
     int ret;
 
-    if (cat->avf)
-        avformat_close_input(&cat->avf);
-
-    cat->avf = avformat_alloc_context();
-    if (!cat->avf)
+    new_avf = avformat_alloc_context();
+    if (!new_avf)
         return AVERROR(ENOMEM);
 
-    cat->avf->interrupt_callback = avf->interrupt_callback;
+    new_avf->interrupt_callback = avf->interrupt_callback;
 
-    if ((ret = ff_copy_whitelists(cat->avf, avf)) < 0)
+    if ((ret = ff_copy_whitelists(new_avf, avf)) < 0)
         return ret;
 
-    if ((ret = avformat_open_input(&cat->avf, file->url, NULL, NULL)) < 0 ||
-        (ret = avformat_find_stream_info(cat->avf, NULL)) < 0) {
+    if ((ret = avformat_open_input(&new_avf, file->url, NULL, NULL)) < 0 ||
+        (ret = avformat_find_stream_info(new_avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
-        avformat_close_input(&cat->avf);
+        avformat_close_input(&new_avf);
         return ret;
     }
-    cat->cur_file = file;
-    if (file->start_time == AV_NOPTS_VALUE)
-        file->start_time = !fileno ? 0 :
-                           cat->files[fileno - 1].start_time +
-                           cat->files[fileno - 1].duration;
-    if ((ret = match_streams(avf)) < 0)
-        return ret;
+
+    if (new_avf) {
+        if (cat->avf)
+            avformat_close_input(&cat->avf);
+
+        cat->avf      = new_avf;
+        cat->cur_file = file;
+        if (file->start_time == AV_NOPTS_VALUE)
+            file->start_time = !fileno ? 0 :
+                               cat->files[fileno - 1].start_time +
+                               cat->files[fileno - 1].duration;
+        if ((ret = match_streams(avf)) < 0)
+            return ret;
+    }
     return 0;
 }
 
@@ -474,13 +480,20 @@ static int filter_packet(AVFormatContext *avf, ConcatStream *cs, AVPacket *pkt)
     return 0;
 }
 
+#define CONCAT_MAX_OPEN_TRY 3
 static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
 {
     ConcatContext *cat = avf->priv_data;
     int ret;
+    int try_counter = 0;
     int64_t file_start_time, delta;
     ConcatStream *cs;
     AVStream *st;
+
+    if (cat->error) {
+        ret = cat->error;
+        goto fail;
+    }
 
     if (!cat->avf)
         return AVERROR(EIO);
@@ -488,8 +501,18 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
     while (1) {
         ret = av_read_frame(cat->avf, pkt);
         if (ret == AVERROR_EOF) {
-            if ((ret = open_next_file(avf)) < 0)
-                return ret;
+            if ((ret = open_next_file(avf)) < 0) {
+                ++try_counter;
+                if (try_counter > CONCAT_MAX_OPEN_TRY) {
+                    cat->error = ret;
+                    if (avf->pb && ret != AVERROR_EOF)
+                        avf->pb->error = ret;
+                    ret = AVERROR_EOF;
+                    goto fail;
+                }
+
+                av_log(avf, AV_LOG_WARNING, "open_next_file() failed (%d)\n", try_counter);
+            }
             continue;
         }
         if (ret < 0)
@@ -528,6 +551,7 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
     av_log(avf, AV_LOG_DEBUG, " -> pts:%s pts_time:%s dts:%s dts_time:%s\n",
            av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, &st->time_base),
            av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, &st->time_base));
+fail:
     return ret;
 }
 
@@ -603,6 +627,9 @@ static int concat_seek(AVFormatContext *avf, int stream,
     ConcatFile *cur_file_saved = cat->cur_file;
     AVFormatContext *cur_avf_saved = cat->avf;
     int ret;
+
+    /* reset error/complete state */
+    cat->error = 0;
 
     if (!cat->seekable)
         return AVERROR(ESPIPE); /* XXX: can we use it? */
