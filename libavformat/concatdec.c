@@ -282,8 +282,9 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
     int64_t delta;
 
     while (1) {
-        if ((ret = av_read_frame(cat->avf, pkt)) != AVERROR_EOF ||
-            (ret = open_next_file(avf)) < 0)
+        if ((ret = av_read_frame(cat->avf, pkt)) != AVERROR_EOF)
+            break;
+        if ((ret = open_next_file(avf)) < 0)
             goto fail;
     }
     delta = av_rescale_q(cat->cur_file->start_time - cat->avf->start_time,
