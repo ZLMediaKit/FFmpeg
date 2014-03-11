@@ -39,6 +39,7 @@ typedef struct {
     AVFormatContext *avf;
     int safe;
     int seekable;
+    int error;
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -280,17 +281,34 @@ static int open_next_file(AVFormatContext *avf)
     return open_file(avf, fileno);
 }
 
+#define CONCAT_MAX_OPEN_TRY 3
 static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
 {
     ConcatContext *cat = avf->priv_data;
     int ret;
+    int try_counter = 0;
     int64_t delta;
+
+    if (cat->error) {
+        ret = AVERROR_EOF;
+        goto fail;
+    }
 
     while (1) {
         if ((ret = av_read_frame(cat->avf, pkt)) != AVERROR_EOF)
             break;
-        if ((ret = open_next_file(avf)) < 0)
-            goto fail;
+        if ((ret = open_next_file(avf)) < 0) {
+            ++try_counter;
+            if (try_counter > CONCAT_MAX_OPEN_TRY) {
+                cat->error = ret;
+                if (avf->pb)
+                    avf->pb->error = ret;
+                ret = AVERROR_EOF;
+                goto fail;
+            }
+
+            av_log(avf, AV_LOG_WARNING, "open_next_file() failed (%d)\n", try_counter);
+        }
     }
     delta = av_rescale_q(cat->cur_file->start_time - cat->avf->start_time,
                          AV_TIME_BASE_Q,
