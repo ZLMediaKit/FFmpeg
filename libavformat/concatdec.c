@@ -298,6 +298,9 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
         if ((ret = av_read_frame(cat->avf, pkt)) != AVERROR_EOF)
             break;
         if ((ret = open_next_file(avf)) < 0) {
+            if (ret == AVERROR_EOF)
+                break;
+
             ++try_counter;
             if (try_counter > CONCAT_MAX_OPEN_TRY) {
                 cat->error = ret;
