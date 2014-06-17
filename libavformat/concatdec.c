@@ -56,6 +56,7 @@ typedef struct {
     ConcatMatchMode stream_match_mode;
     unsigned auto_convert;
     int error;
+    int rw_timeout;    /**< Network timeout. */
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -286,14 +287,21 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     if (!new_avf)
         return AVERROR(ENOMEM);
 
+    AVDictionary *opts = NULL;
+    char opts_format[32];
+    snprintf(opts_format, sizeof(opts_format), "%d", cat->rw_timeout);
+    av_dict_set(&opts, "timeout", opts_format, 0);
+
     new_avf->interrupt_callback = avf->interrupt_callback;
-    if ((ret = avformat_open_input(&new_avf, file->url, NULL, NULL)) < 0 ||
+    if ((ret = avformat_open_input(&new_avf, file->url, NULL, &opts)) < 0 ||
         (ret = avformat_find_stream_info(new_avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
+        av_dict_free(&opts);
         avformat_close_input(&new_avf);
         return ret;
     }
 
+    av_dict_free(&opts);
     if (new_avf) {
         if (cat->avf)
             avformat_close_input(&cat->avf);
@@ -634,6 +642,7 @@ static const AVOption options[] = {
       OFFSET(safe), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 1, DEC },
     { "auto_convert", "automatically convert bitstream format",
       OFFSET(auto_convert), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, DEC },
+    { "timeout", "set timeout of socket I/O operations", OFFSET(rw_timeout), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, DEC },
     { NULL }
 };
 
