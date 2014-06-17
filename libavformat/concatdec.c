@@ -301,7 +301,7 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
             ++try_counter;
             if (try_counter > CONCAT_MAX_OPEN_TRY) {
                 cat->error = ret;
-                if (avf->pb)
+                if (avf->pb && ret != AVERROR_EOF)
                     avf->pb->error = ret;
                 ret = AVERROR_EOF;
                 goto fail;
