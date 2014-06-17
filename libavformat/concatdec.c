@@ -290,7 +290,7 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
     int64_t delta;
 
     if (cat->error) {
-        ret = AVERROR_EOF;
+        ret = cat->error;
         goto fail;
     }
 
@@ -396,6 +396,9 @@ static int concat_seek(AVFormatContext *avf, int stream,
     ConcatFile *cur_file_saved = cat->cur_file;
     AVFormatContext *cur_avf_saved = cat->avf;
     int ret;
+
+    /* reset error/complete state */
+    cat->error = 0;
 
     if (!cat->seekable)
         return AVERROR(ESPIPE); /* XXX: can we use it? */
