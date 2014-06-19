@@ -40,7 +40,7 @@ typedef struct {
     int safe;
     int seekable;
     int error;
-    int64_t rw_timeout;    /**< Network timeout. */
+    int rw_timeout;    /**< Network timeout. */
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -139,7 +139,7 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
 
     AVDictionary *opts = NULL;
     char opts_format[32];
-    snprintf(opts_format, sizeof(opts_format), "%"PRId64, cat->rw_timeout);
+    snprintf(opts_format, sizeof(opts_format), "%d", cat->rw_timeout);
     av_dict_set(&opts, "timeout", opts_format, 0);
 
     new_avf->interrupt_callback = avf->interrupt_callback;
