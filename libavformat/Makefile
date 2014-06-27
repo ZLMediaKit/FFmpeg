@@ -6,6 +6,7 @@ FFLIBS = avcodec avutil
 HEADERS = avformat.h                                                    \
           avio.h                                                        \
           version.h                                                     \
+          ijkavfmsg.h                                                   \
 
 OBJS = allformats.o         \
        avio.o               \
