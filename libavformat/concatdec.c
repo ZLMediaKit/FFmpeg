@@ -24,6 +24,7 @@
 #include "avformat.h"
 #include "internal.h"
 #include "url.h"
+#include "ijkavfmsg.h"
 
 typedef struct {
     char *url;
@@ -131,6 +132,8 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     ConcatContext *cat = avf->priv_data;
     ConcatFile *file = &cat->files[fileno];
     AVFormatContext *new_avf = NULL;
+    IJKFormatSegmentContext fsc;
+    const char *url = NULL;
     int ret;
 
     new_avf = avformat_alloc_context();
@@ -142,8 +145,22 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     snprintf(opts_format, sizeof(opts_format), "%d", cat->rw_timeout);
     av_dict_set(&opts, "timeout", opts_format, 0);
 
+    url = file->url;
+    memset(&fsc, 0, sizeof(fsc));
+    if (avf->control_message_cb) {
+        fsc.position = fileno;
+        int cb_ret = avf->control_message_cb(avf, IJKAVF_CM_RESOLVE_SEGMENT, &fsc, sizeof(fsc));
+        if (cb_ret == 0) {
+            if (fsc.url)
+                url = fsc.url;
+        }
+    }
+
     new_avf->interrupt_callback = avf->interrupt_callback;
-    if ((ret = avformat_open_input(&new_avf, file->url, NULL, &opts)) < 0 ||
+    ret = avformat_open_input(&new_avf, url, NULL, &opts);
+    if (fsc.url_free)
+        fsc.url_free(fsc.url);
+    if (ret < 0 ||
         (ret = avformat_find_stream_info(new_avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
         av_dict_free(&opts);
