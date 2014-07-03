@@ -1802,8 +1802,8 @@ static int decode_update_thread_context(AVCodecContext *dst,
         av_freep(&h->rbsp_buffer[1]);
         av_frame_unref(&h->cur_pic.f);
         memcpy(h, h1, offsetof(H264Context, intra_pcm_ptr));
-        memset(&h->cur_pic, 0, sizeof(h->cur_pic));
-        av_frame_ref(&h->cur_pic.f, &h1->cur_pic.f);
+        if (h1->cur_pic.f.extended_data == h1->cur_pic.f.data)
+            h->cur_pic.f.extended_data = h->cur_pic.f.data;
         memcpy(&h->cabac, &h1->cabac,
                sizeof(H264Context) - offsetof(H264Context, cabac));
         av_assert0((void*)&h->cabac == &h->mb_padding + 1);
