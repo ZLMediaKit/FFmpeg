@@ -23,6 +23,15 @@
 #ifndef AVFORMAT_IJKAVFMSG_H
 #define AVFORMAT_IJKAVFMSG_H
 
+typedef struct IJKFormatSegmentConcatContext {
+    /**
+     * Segment position (0-based) in stream
+     *
+     * set by demux
+     */
+    int count;
+} IJKFormatSegmentConcatContext;
+
 typedef struct IJKFormatSegmentContext {
     /**
      * Segment position (0-based) in stream
@@ -30,6 +39,13 @@ typedef struct IJKFormatSegmentContext {
      * set by demux
      */
     int position;
+
+    /**
+     * Segment duration
+     *
+     * set by application
+     */
+    int64_t duration;
 
     /**
      * Segment url, use url_free to free
@@ -47,6 +63,15 @@ typedef struct IJKFormatSegmentContext {
 } IJKFormatSegmentContext;
 
 /**
+ * Resolve segment count
+ *
+ * @param data      IJKFormatSegmentConcatContext pointer
+ * @param data_size size of data;
+ * @return 0 if OK, AVERROR_xxx otherwise
+ */
+#define IJKAVF_CM_RESOLVE_SEGMENT_CONCAT 0x10000
+
+/**
  * Resolve segment url from concatdec
  *
  * @param data      IJKFormatSegmentContext pointer
@@ -54,5 +79,14 @@ typedef struct IJKFormatSegmentContext {
  * @return 0 if OK, AVERROR_xxx otherwise
  */
 #define IJKAVF_CM_RESOLVE_SEGMENT 0x10001
+
+/**
+ * Resolve segment meta from concatdec
+ *
+ * @param data      IJKFormatSegmentContext pointer
+ * @param data_size size of data;
+ * @return 0 if OK, AVERROR_xxx otherwise
+ */
+#define IJKAVF_CM_RESOLVE_SEGMENT_OFFLINE 0x10002
 
 #endif /* AVFORMAT_IJKAVFMSG_H */
