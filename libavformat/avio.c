@@ -31,6 +31,7 @@
 #include "url.h"
 
 static URLProtocol *first_protocol = NULL;
+static void (*avijk_io_stat_cb)(const char *url, int type, int bytes);
 
 URLProtocol *ffurl_protocol_next(URLProtocol *prev)
 {
@@ -329,14 +330,20 @@ int ffurl_read(URLContext *h, unsigned char *buf, int size)
 {
     if (!(h->flags & AVIO_FLAG_READ))
         return AVERROR(EIO);
-    return retry_transfer_wrapper(h, buf, size, 1, h->prot->url_read);
+    int read = retry_transfer_wrapper(h, buf, size, 1, h->prot->url_read);
+    if (read > 0 && avijk_io_stat_cb && h)
+        avijk_io_stat_cb(h->filename, AVIJK_IO_STAT_READ, read);
+    return read;
 }
 
 int ffurl_read_complete(URLContext *h, unsigned char *buf, int size)
 {
     if (!(h->flags & AVIO_FLAG_READ))
         return AVERROR(EIO);
-    return retry_transfer_wrapper(h, buf, size, size, h->prot->url_read);
+    int read = retry_transfer_wrapper(h, buf, size, size, h->prot->url_read);
+    if (read > 0 && avijk_io_stat_cb && h && h->prot)
+        avijk_io_stat_cb(h->filename, AVIJK_IO_STAT_READ, read);
+    return read;
 }
 
 int ffurl_write(URLContext *h, const unsigned char *buf, int size)
@@ -464,4 +471,9 @@ int ff_check_interrupt(AVIOInterruptCB *cb)
     if (cb && cb->callback && (ret = cb->callback(cb->opaque)))
         return ret;
     return 0;
+}
+
+void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes))
+{
+    avijk_io_stat_cb = cb;
 }

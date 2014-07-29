@@ -493,4 +493,8 @@ int     avio_pause(AVIOContext *h, int pause);
 int64_t avio_seek_time(AVIOContext *h, int stream_index,
                        int64_t timestamp, int flags);
 
+
+#define AVIJK_IO_STAT_READ 1
+void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes));
+
 #endif /* AVFORMAT_AVIO_H */
