@@ -49,6 +49,16 @@ typedef struct URLContext {
     int is_connected;
     AVIOInterruptCB interrupt_callback;
     int64_t rw_timeout;         /**< maximum time to wait for (network) read/write operation completion, in mcs */
+
+    /**
+     * ijkplayer custom API
+     */
+    /*
+     * in microseconds
+     */
+    int64_t ijk_connected_time;
+    int64_t ijk_read_bytes;
+    int64_t ijk_io_stat_completed;
 } URLContext;
 
 typedef struct URLProtocol {
