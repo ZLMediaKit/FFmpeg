@@ -497,6 +497,8 @@ int64_t avio_seek_time(AVIOContext *h, int stream_index,
 #define AVIJK_IO_STAT_READ 1
 void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes));
 
-void avijk_io_stat_complete_register(void (*cb)(const char *url, int64_t read_bytes, int64_t total_size, int64_t elpased_time));
+void avijk_io_stat_complete_register(void (*cb)(const char *url,
+                                                int64_t read_bytes, int64_t total_size,
+                                                int64_t elpased_time, int64_t total_duration));
 
 #endif /* AVFORMAT_AVIO_H */

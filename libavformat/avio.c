@@ -32,7 +32,9 @@
 
 static URLProtocol *first_protocol = NULL;
 static void (*avijk_io_stat_cb)(const char *url, int type, int bytes);
-static void (*avijk_io_stat_complete_cb)(const char *url, int64_t read_bytes, int64_t total_size, int64_t elpased_time);
+static void (*cb)(const char *url,
+                  int64_t read_bytes, int64_t total_size,
+                  int64_t elpased_time, int64_t total_duration)
 
 URLProtocol *ffurl_protocol_next(URLProtocol *prev)
 {
@@ -390,7 +392,7 @@ static void ijkffurl_notify_io_stat(URLContext *h)
         int64_t elpased    = (now - h->ijk_connected_time) / 1000;
         int64_t total_size = ffurl_seek(h, 0, AVSEEK_SIZE);
 
-        avijk_io_stat_complete_cb(h->filename, h->ijk_read_bytes, total_size, elpased);
+        avijk_io_stat_complete_cb(h->filename, h->ijk_read_bytes, total_size, elpased, 0);
 
         h->ijk_connected_time    = av_gettime();
         h->ijk_read_bytes        = 0;
@@ -511,7 +513,9 @@ void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes))
     avijk_io_stat_cb = cb;
 }
 
-void avijk_io_stat_complete_register(void (*cb)(const char *url, int64_t read_bytes, int64_t total_size, int64_t elpased_time))
+void avijk_io_stat_complete_register(void (*cb)(const char *url,
+                                                int64_t read_bytes, int64_t total_size,
+                                                int64_t elpased_time, int64_t total_duration))
 {
     avijk_io_stat_complete_cb = cb;
 }
