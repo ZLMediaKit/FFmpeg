@@ -494,11 +494,17 @@ int64_t avio_seek_time(AVIOContext *h, int stream_index,
                        int64_t timestamp, int flags);
 
 
+/*
+ * ijkplayer custom API
+ */
+
+void avijk_avio_set_duration(AVIOContext *h, int64_t duration_milli);
+
 #define AVIJK_IO_STAT_READ 1
 void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes));
 
 void avijk_io_stat_complete_register(void (*cb)(const char *url,
                                                 int64_t read_bytes, int64_t total_size,
-                                                int64_t elpased_time, int64_t total_duration));
+                                                int64_t elpased_time_milli, int64_t total_duration_milli));
 
 #endif /* AVFORMAT_AVIO_H */

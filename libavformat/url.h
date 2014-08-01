@@ -56,9 +56,10 @@ typedef struct URLContext {
     /*
      * in microseconds
      */
-    int64_t ijk_connected_time;
+    int64_t ijk_connected_time_micro;
     int64_t ijk_read_bytes;
     int64_t ijk_io_stat_completed;
+    int64_t ijk_total_duration_milli;
 } URLContext;
 
 typedef struct URLProtocol {

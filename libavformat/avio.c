@@ -32,9 +32,9 @@
 
 static URLProtocol *first_protocol = NULL;
 static void (*avijk_io_stat_cb)(const char *url, int type, int bytes);
-static void (*cb)(const char *url,
-                  int64_t read_bytes, int64_t total_size,
-                  int64_t elpased_time, int64_t total_duration)
+static void (*avijk_io_stat_complete_cb)(const char *url,
+                                         int64_t read_bytes, int64_t total_size,
+                                         int64_t elpased_time_milli, int64_t total_duration_milli);
 
 URLProtocol *ffurl_protocol_next(URLProtocol *prev)
 {
@@ -211,9 +211,9 @@ int ffurl_connect(URLContext *uc, AVDictionary **options)
     if ((uc->flags & AVIO_FLAG_WRITE) || !strcmp(uc->prot->name, "file"))
         if (!uc->is_streamed && ffurl_seek(uc, 0, SEEK_SET) < 0)
             uc->is_streamed = 1;
-    uc->ijk_connected_time    = av_gettime();
-    uc->ijk_read_bytes        = 0;
-    uc->ijk_io_stat_completed = 0;
+    uc->ijk_connected_time_micro = av_gettime();
+    uc->ijk_read_bytes           = 0;
+    uc->ijk_io_stat_completed    = 0;
     return 0;
 }
 
@@ -388,15 +388,16 @@ static void ijkffurl_notify_io_stat(URLContext *h)
         h->filename &&
         !h->ijk_io_stat_completed &&
         h->ijk_read_bytes > 0) {
-        int64_t now        = av_gettime();
-        int64_t elpased    = (now - h->ijk_connected_time) / 1000;
-        int64_t total_size = ffurl_seek(h, 0, AVSEEK_SIZE);
+        int64_t now                  = av_gettime();
+        int64_t total_size           = ffurl_seek(h, 0, AVSEEK_SIZE);
+        int64_t elpased_milli        = (now - h->ijk_connected_time_micro) / 1000;
+        int64_t total_duration_milli = h->ijk_total_duration_milli;
 
-        avijk_io_stat_complete_cb(h->filename, h->ijk_read_bytes, total_size, elpased, 0);
+        avijk_io_stat_complete_cb(h->filename, h->ijk_read_bytes, total_size, elpased_milli, total_duration_milli);
 
-        h->ijk_connected_time    = av_gettime();
-        h->ijk_read_bytes        = 0;
-        h->ijk_io_stat_completed = 1;
+        h->ijk_connected_time_micro = av_gettime();
+        h->ijk_read_bytes           = 0;
+        h->ijk_io_stat_completed    = 1;
     }
 }
 
@@ -508,6 +509,10 @@ int ff_check_interrupt(AVIOInterruptCB *cb)
     return 0;
 }
 
+/*
+ * ijkplayer custom API
+ */
+
 void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes))
 {
     avijk_io_stat_cb = cb;
@@ -515,7 +520,7 @@ void avijk_io_stat_register(void (*cb)(const char *url, int type, int bytes))
 
 void avijk_io_stat_complete_register(void (*cb)(const char *url,
                                                 int64_t read_bytes, int64_t total_size,
-                                                int64_t elpased_time, int64_t total_duration))
+                                                int64_t elpased_time_milli, int64_t total_duration_milli))
 {
     avijk_io_stat_complete_cb = cb;
 }
