@@ -281,7 +281,10 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     ConcatContext *cat = avf->priv_data;
     ConcatFile *file = &cat->files[fileno];
     AVFormatContext *new_avf = NULL;
+    IJKFormatSegmentContext fsc;
+    const char *url = NULL;
     int ret;
+    int cb_ret;
 
     new_avf = avformat_alloc_context();
     if (!new_avf)
@@ -292,8 +295,22 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     snprintf(opts_format, sizeof(opts_format), "%d", cat->rw_timeout);
     av_dict_set(&opts, "timeout", opts_format, 0);
 
+    url = file->url;
+    memset(&fsc, 0, sizeof(fsc));
+    if (avf->control_message_cb) {
+        fsc.position = fileno;
+        cb_ret = avf->control_message_cb(avf, IJKAVF_CM_RESOLVE_SEGMENT, &fsc, sizeof(fsc));
+        if (cb_ret == 0) {
+            if (fsc.url)
+                url = fsc.url;
+        }
+    }
+
     new_avf->interrupt_callback = avf->interrupt_callback;
-    if ((ret = avformat_open_input(&new_avf, file->url, NULL, &opts)) < 0 ||
+    ret = avformat_open_input(&new_avf, url, NULL, &opts);
+    if (fsc.url_free)
+        fsc.url_free(fsc.url);
+    if (ret < 0 ||
         (ret = avformat_find_stream_info(new_avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
         av_dict_free(&opts);
@@ -342,8 +359,34 @@ static int concat_read_header(AVFormatContext *avf)
     unsigned nb_files_alloc = 0;
     ConcatFile *file = NULL;
     int64_t time = 0;
+    int cb_ret = 0;
+    IJKFormatSegmentConcatContext fsc_cat;
+    IJKFormatSegmentContext fsc;
 
-    while (1) {
+    if (avf->control_message_cb) {
+        cb_ret = avf->control_message_cb(avf, IJKAVF_CM_RESOLVE_SEGMENT_CONCAT, &fsc_cat, sizeof(fsc_cat));
+        if (cb_ret == 0) {
+            for (int i = 0; i < fsc_cat.count; ++i) {
+                memset(&fsc, 0, sizeof(fsc));
+                fsc.position = i;
+                cb_ret = avf->control_message_cb(avf, IJKAVF_CM_RESOLVE_SEGMENT_OFFLINE, &fsc, sizeof(fsc));
+                if (cb_ret == 0 && fsc.url != NULL) {
+                    char *filename = av_strdup(fsc.url);
+                    if (fsc.url_free) {
+                        fsc.url_free(fsc.url);
+                    }
+
+                    av_log(avf, AV_LOG_ERROR, "Segment %d: %"PRId64": %s\n", i, fsc.duration, filename);
+                    if ((ret = add_file(avf, filename, &file, &nb_files_alloc)) < 0)
+                        FAIL(ret);
+
+                    file->duration = fsc.duration;
+                }
+            }
+        }
+    }
+
+    while (fsc_cat.count <= 0) {
         if ((ret = ff_get_line(avf->pb, buf, sizeof(buf))) <= 0)
             break;
         line++;
@@ -417,6 +460,7 @@ static int concat_read_header(AVFormatContext *avf)
     if (i == cat->nb_files) {
         avf->duration = time;
         cat->seekable = 1;
+        av_log(avf, AV_LOG_ERROR, "concat seekable: %d, %"PRId64"\n", cat->seekable, time);
     }
 
     cat->stream_match_mode = avf->nb_streams ? MATCH_EXACT_ID :
