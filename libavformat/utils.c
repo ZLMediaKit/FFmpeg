@@ -2233,7 +2233,6 @@ static void update_stream_timings(AVFormatContext *ic)
     if (duration != INT64_MIN && duration > 0 && ic->duration == AV_NOPTS_VALUE) {
         ic->duration = duration;
     }
-    avijk_avio_set_duration(ic->pb, av_rescale(ic->duration - ic->start_time, 1000, AV_TIME_BASE));
     if (ic->pb && (filesize = avio_size(ic->pb)) > 0 && ic->duration != AV_NOPTS_VALUE) {
         /* compute the bitrate */
         double bitrate = (double) filesize * 8.0 * AV_TIME_BASE /

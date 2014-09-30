@@ -1144,19 +1144,3 @@ int ffio_close_null_buf(AVIOContext *s)
     av_free(s);
     return size;
 }
-
-/*
- * ijkplayer custom API
- */
-
-void avijk_avio_set_duration(AVIOContext *s, int64_t duration_milli)
-{
-    if (!s)
-        return;
-
-    URLContext *h = s->opaque;
-    if (!h)
-        return;
-
-    h->ijk_total_duration_milli = duration_milli;
-}
