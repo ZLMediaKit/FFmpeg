@@ -363,6 +363,8 @@ static int concat_read_header(AVFormatContext *avf)
     IJKFormatSegmentConcatContext fsc_cat;
     IJKFormatSegmentContext fsc;
 
+    memset(&fsc_cat, 0, sizeof(fsc_cat));
+    memset(&fsc, 0, sizeof(fsc));
     if (avf->control_message_cb) {
         cb_ret = avf->control_message_cb(avf, IJKAVF_CM_RESOLVE_SEGMENT_CONCAT, &fsc_cat, sizeof(fsc_cat));
         if (cb_ret == 0) {
