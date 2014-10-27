@@ -1564,6 +1564,7 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
                             get_timebase(pls), AV_TIME_BASE_Q);
                 }
 
+                pls->seek_timestamp = AV_NOPTS_VALUE;
                 if (pls->seek_timestamp == AV_NOPTS_VALUE)
                     break;
 
