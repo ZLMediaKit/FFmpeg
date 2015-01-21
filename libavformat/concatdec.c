@@ -27,6 +27,7 @@
 #include "avformat.h"
 #include "internal.h"
 #include "url.h"
+#include <stdbool.h>
 
 typedef enum ConcatMatchMode {
     MATCH_ONE_TO_ONE,
@@ -570,6 +571,7 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
     while (1) {
         ret = av_read_frame(cat->avf, pkt);
         if (ret == AVERROR_EOF || packet_after_outpoint(cat, pkt)) {
+            pkt->flags |= AV_PKT_FLAG_NEW_SEG;
             if (ret == 0)
                 av_packet_unref(pkt);
             if ((ret = open_next_file(avf)) < 0) {
