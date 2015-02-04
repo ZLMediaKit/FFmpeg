@@ -664,6 +664,10 @@ int ff_read_packet(AVFormatContext *s, AVPacket *pkt)
         av_init_packet(pkt);
         ret = s->iformat->read_packet(s, pkt);
         if (ret < 0) {
+            if (pkt->flags & AV_PKT_FLAG_MP4_PF) {
+                return ret;
+            }
+
             if (!pktl || ret == AVERROR(EAGAIN))
                 return ret;
             for (i = 0; i < s->nb_streams; i++) {
@@ -1317,6 +1321,11 @@ static int read_frame_internal(AVFormatContext *s, AVPacket *pkt)
         /* read next packet */
         ret = ff_read_packet(s, &cur_pkt);
         if (ret < 0) {
+            if (cur_pkt.flags & AV_PKT_FLAG_MP4_PF) {
+                pkt->flags |= AV_PKT_FLAG_MP4_PF;
+                return ret;
+            }
+
             if (ret == AVERROR(EAGAIN))
                 return ret;
             /* flush the parsers */
@@ -1475,6 +1484,11 @@ int av_read_frame(AVFormatContext *s, AVPacket *pkt)
               ? read_from_packet_buffer(&s->internal->packet_buffer,
                                         &s->internal->packet_buffer_end, pkt)
               : read_frame_internal(s, pkt);
+
+        if (pkt->flags & AV_PKT_FLAG_MP4_PF) {
+            return ret;
+        }
+
         if (ret < 0)
             return ret;
         goto return_packet;
@@ -1528,6 +1542,10 @@ int av_read_frame(AVFormatContext *s, AVPacket *pkt)
 
         ret = read_frame_internal(s, pkt);
         if (ret < 0) {
+            if (pkt->flags & AV_PKT_FLAG_MP4_PF) {
+                return ret;
+            }
+
             if (pktl && ret != AVERROR(EAGAIN)) {
                 eof = 1;
                 continue;
@@ -3178,6 +3196,10 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
         /* NOTE: A new stream can be added there if no header in file
          * (AVFMTCTX_NOHEADER). */
         ret = read_frame_internal(ic, &pkt1);
+        if (pkt1.flags & AV_PKT_FLAG_MP4_PF) {
+            return ret;
+        }
+
         if (ret == AVERROR(EAGAIN))
             continue;
 
