@@ -64,6 +64,7 @@ typedef struct {
     ConcatMatchMode stream_match_mode;
     unsigned auto_convert;
     int error;
+    AVDictionary *options;
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -293,6 +294,7 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     ConcatFile *file = &cat->files[fileno];
     AVFormatContext *new_avf = NULL;
     int ret;
+    AVDictionary *tmp = NULL;
 
     new_avf = avformat_alloc_context();
     if (!new_avf)
@@ -350,11 +352,12 @@ static int concat_read_close(AVFormatContext *avf)
         av_freep(&cat->files[i].streams);
         av_dict_free(&cat->files[i].metadata);
     }
+    av_dict_free(&cat->options);
     av_freep(&cat->files);
     return 0;
 }
 
-static int concat_read_header(AVFormatContext *avf)
+static int concat_read_header(AVFormatContext *avf, AVDictionary **options)
 {
     ConcatContext *cat = avf->priv_data;
     uint8_t buf[4096];
@@ -753,7 +756,7 @@ AVInputFormat ff_concat_demuxer = {
     .long_name      = NULL_IF_CONFIG_SMALL("Virtual concatenation script"),
     .priv_data_size = sizeof(ConcatContext),
     .read_probe     = concat_probe,
-    .read_header    = concat_read_header,
+    .read_header2   = concat_read_header,
     .read_packet    = concat_read_packet,
     .read_close     = concat_read_close,
     .read_seek2     = concat_seek,
