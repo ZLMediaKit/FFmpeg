@@ -58,6 +58,7 @@ typedef struct {
     ConcatMatchMode stream_match_mode;
     unsigned auto_convert;
     int error;
+    AVDictionary *options;
 } ConcatContext;
 
 static int concat_probe(AVProbeData *probe)
@@ -286,6 +287,7 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     const char *url = NULL;
     int ret;
     int cb_ret;
+    AVDictionary *tmp = NULL;
 
     new_avf = avformat_alloc_context();
     if (!new_avf)
@@ -307,14 +309,17 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     if ((ret = ff_copy_whitelists(new_avf, avf)) < 0)
         return ret;
 
-    ret = avformat_open_input(&new_avf, url, NULL, NULL);
+    if (cat->options)
+        av_dict_copy(&tmp, cat->options, 0);
+
+    ret = avformat_open_input(&new_avf, url, NULL, &tmp);
     if (fsc.url_free)
         fsc.url_free(fsc.url);
     if (ret < 0 ||
         (ret = avformat_find_stream_info(new_avf, NULL)) < 0) {
         av_log(avf, AV_LOG_ERROR, "Impossible to open '%s'\n", file->url);
         avformat_close_input(&new_avf);
-        return ret;
+        goto fail;
     }
 
     if (new_avf) {
@@ -328,9 +333,11 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
                                cat->files[fileno - 1].start_time +
                                cat->files[fileno - 1].duration;
         if ((ret = match_streams(avf)) < 0)
-            return ret;
+            goto fail;
     }
-    return 0;
+fail:
+    av_dict_free(&tmp);
+    return ret;
 }
 
 static int concat_read_close(AVFormatContext *avf)
@@ -344,11 +351,12 @@ static int concat_read_close(AVFormatContext *avf)
         av_freep(&cat->files[i].url);
         av_freep(&cat->files[i].streams);
     }
+    av_dict_free(&cat->options);
     av_freep(&cat->files);
     return 0;
 }
 
-static int concat_read_header(AVFormatContext *avf)
+static int concat_read_header(AVFormatContext *avf, AVDictionary **options)
 {
     ConcatContext *cat = avf->priv_data;
     uint8_t buf[4096];
@@ -465,6 +473,8 @@ static int concat_read_header(AVFormatContext *avf)
 
     cat->stream_match_mode = avf->nb_streams ? MATCH_EXACT_ID :
                                                MATCH_ONE_TO_ONE;
+    if (options)
+        av_dict_copy(&cat->options, *options, 0);
     if ((ret = open_file(avf, 0)) < 0)
         goto fail;
     return 0;
@@ -724,7 +734,7 @@ AVInputFormat ff_concat_demuxer = {
     .long_name      = NULL_IF_CONFIG_SMALL("Virtual concatenation script"),
     .priv_data_size = sizeof(ConcatContext),
     .read_probe     = concat_probe,
-    .read_header    = concat_read_header,
+    .read_header2   = concat_read_header,
     .read_packet    = concat_read_packet,
     .read_close     = concat_read_close,
     .read_seek2     = concat_seek,
