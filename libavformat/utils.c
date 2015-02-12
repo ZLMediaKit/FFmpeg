@@ -506,6 +506,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     AVFormatContext *s = *ps;
     int i, ret = 0;
     AVDictionary *tmp = NULL;
+    AVDictionary *tmp2 = NULL;
     ID3v2ExtraMeta *id3v2_extra_meta = NULL;
 
     if (!s && !(s = avformat_alloc_context()))
@@ -583,9 +584,16 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     if (s->pb)
         ff_id3v2_read(s, ID3v2_DEFAULT_MAGIC, &id3v2_extra_meta, 0);
 
-    if (!(s->flags&AVFMT_FLAG_PRIV_OPT) && s->iformat->read_header)
-        if ((ret = s->iformat->read_header(s)) < 0)
+    if (!(s->flags&AVFMT_FLAG_PRIV_OPT)) {
+        if (s->iformat->read_header2) {
+            if (options)
+                av_dict_copy(&tmp2, *options, 0);
+
+            if ((ret = s->iformat->read_header2(s, &tmp2)) < 0)
+                goto fail;
+        } else if (s->iformat->read_header && (ret = s->iformat->read_header(s)) < 0)
             goto fail;
+    }
 
     if (id3v2_extra_meta) {
         if (!strcmp(s->iformat->name, "mp3") || !strcmp(s->iformat->name, "aac") ||
@@ -613,6 +621,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     if (options) {
         av_dict_free(options);
         *options = tmp;
+        av_dict_free(&tmp2);
     }
     *ps = s;
     return 0;
@@ -620,6 +629,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
 fail:
     ff_id3v2_free_extra_meta(&id3v2_extra_meta);
     av_dict_free(&tmp);
+    av_dict_free(&tmp2);
     if (s->pb && !(s->flags & AVFMT_FLAG_CUSTOM_IO))
         avio_closep(&s->pb);
     avformat_free_context(s);
