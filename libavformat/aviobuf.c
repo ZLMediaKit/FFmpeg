@@ -528,6 +528,19 @@ int avio_r8(AVIOContext *s)
     return 0;
 }
 
+int avio_strict_r8(AVIOContext *s, int *error)
+{
+    av_assert2(error);
+    if (s->buf_ptr >= s->buf_end)
+        fill_buffer(s);
+    if (s->buf_ptr < s->buf_end) {
+        *error = 0;
+        return *s->buf_ptr++;
+    }
+    *error = AVERROR(EIO);
+    return 0;
+}
+
 int avio_read(AVIOContext *s, unsigned char *buf, int size)
 {
     int len, size1;
@@ -633,11 +646,37 @@ unsigned int avio_rl16(AVIOContext *s)
     return val;
 }
 
+unsigned int avio_strict_rl16(AVIOContext *s, int *error)
+{
+    unsigned int val;
+    av_assert2(error);
+    val = avio_strict_r8(s, error);
+    if (*error < 0)
+        return 0;
+    val |= avio_strict_r8(s, error) << 8;
+    if (*error < 0)
+        return 0;
+    return val;
+}
+
 unsigned int avio_rl24(AVIOContext *s)
 {
     unsigned int val;
     val = avio_rl16(s);
     val |= avio_r8(s) << 16;
+    return val;
+}
+
+unsigned int avio_strict_rl24(AVIOContext *s, int *error)
+{
+    unsigned int val;
+    av_assert2(error);
+    val = avio_strict_rl16(s, error);
+    if (*error < 0)
+        return 0;
+    val |= avio_strict_r8(s, error) << 16;
+    if (*error < 0)
+        return 0;
     return val;
 }
 
@@ -649,11 +688,37 @@ unsigned int avio_rl32(AVIOContext *s)
     return val;
 }
 
+unsigned int avio_strict_rl32(AVIOContext *s, int *error)
+{
+    unsigned int val;
+    av_assert2(error);
+    val = avio_strict_rl16(s, error);
+    if (*error < 0)
+        return 0;
+    val |= avio_strict_rl16(s, error) << 16;
+    if (*error < 0)
+        return 0;
+    return val;
+}
+
 uint64_t avio_rl64(AVIOContext *s)
 {
     uint64_t val;
     val = (uint64_t)avio_rl32(s);
     val |= (uint64_t)avio_rl32(s) << 32;
+    return val;
+}
+
+uint64_t avio_strict_rl64(AVIOContext *s, int *error)
+{
+    uint64_t val;
+    av_assert2(error);
+    val = (uint64_t)avio_strict_rl32(s, error);
+    if (*error < 0)
+        return 0;
+    val |= (uint64_t)avio_strict_rl32(s, error) << 32;
+    if (*error < 0)
+        return 0;
     return val;
 }
 
@@ -665,6 +730,19 @@ unsigned int avio_rb16(AVIOContext *s)
     return val;
 }
 
+unsigned int avio_strict_rb16(AVIOContext *s, int *error)
+{
+    unsigned int val;
+    av_assert2(error);
+    val = avio_strict_r8(s, error) << 8;
+    if (*error < 0)
+        return 0;
+    val |= avio_strict_r8(s, error);
+    if (*error < 0)
+        return 0;
+    return val;
+}
+
 unsigned int avio_rb24(AVIOContext *s)
 {
     unsigned int val;
@@ -672,11 +750,38 @@ unsigned int avio_rb24(AVIOContext *s)
     val |= avio_r8(s);
     return val;
 }
+
+unsigned int avio_strict_rb24(AVIOContext *s, int *error)
+{
+    unsigned int val;
+    av_assert2(error);
+    val = avio_strict_rb16(s, error) << 8;
+    if (*error < 0)
+        return 0;
+    val |= avio_strict_r8(s, error);
+    if (*error < 0)
+        return 0;
+    return val;
+}
+
 unsigned int avio_rb32(AVIOContext *s)
 {
     unsigned int val;
     val = avio_rb16(s) << 16;
     val |= avio_rb16(s);
+    return val;
+}
+
+unsigned int avio_strict_rb32(AVIOContext *s, int *error)
+{
+    unsigned int val;
+    av_assert2(error);
+    val = avio_strict_rb16(s, error) << 16;
+    if (*error < 0)
+        return 0;
+    val |= avio_strict_rb16(s, error);
+    if (*error < 0)
+        return 0;
     return val;
 }
 
@@ -744,6 +849,19 @@ uint64_t avio_rb64(AVIOContext *s)
     uint64_t val;
     val = (uint64_t)avio_rb32(s) << 32;
     val |= (uint64_t)avio_rb32(s);
+    return val;
+}
+
+uint64_t avio_strict_rb64(AVIOContext *s, int *error)
+{
+    uint64_t val;
+    av_assert2(error);
+    val = (uint64_t)avio_strict_rb32(s, error) << 32;
+    if (*error < 0)
+        return 0;
+    val |= (uint64_t)avio_strict_rb32(s, error);
+    if (*error < 0)
+        return 0;
     return val;
 }
 

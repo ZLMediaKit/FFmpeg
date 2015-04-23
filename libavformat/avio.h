@@ -331,6 +331,16 @@ unsigned int avio_rb16(AVIOContext *s);
 unsigned int avio_rb24(AVIOContext *s);
 unsigned int avio_rb32(AVIOContext *s);
 uint64_t     avio_rb64(AVIOContext *s);
+
+int          avio_strict_r8  (AVIOContext *s, int *error);
+unsigned int avio_strict_rl16(AVIOContext *s, int *error);
+unsigned int avio_strict_rl24(AVIOContext *s, int *error);
+unsigned int avio_strict_rl32(AVIOContext *s, int *error);
+uint64_t     avio_strict_rl64(AVIOContext *s, int *error);
+unsigned int avio_strict_rb16(AVIOContext *s, int *error);
+unsigned int avio_strict_rb24(AVIOContext *s, int *error);
+unsigned int avio_strict_rb32(AVIOContext *s, int *error);
+uint64_t     avio_strict_rb64(AVIOContext *s, int *error);
 /**
  * @}
  */
