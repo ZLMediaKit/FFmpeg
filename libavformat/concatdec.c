@@ -574,8 +574,11 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
             }
             continue;
         }
-        if (ret < 0)
+        if (ret < 0) {
+            if (avf->pb && cat->avf->pb)
+                avf->pb->error = cat->avf->pb->error;
             return ret;
+        }
         if (is_new_st) {
             pkt->flags |= AV_PKT_FLAG_NEW_SEG;
             is_new_st = false;
