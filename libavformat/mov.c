@@ -4251,7 +4251,12 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     }
 
     if (st->discard != AVDISCARD_ALL) {
-        if (avio_seek(sc->pb, sample->pos, SEEK_SET) != sample->pos) {
+        ret = avio_seek(sc->pb, sample->pos, SEEK_SET);
+        if (ret < 0) {
+            if (sc->pb)
+                sc->pb->error = ret;
+            return AVERROR_INVALIDDATA;
+        } else if (ret != sample->pos) {
             av_log(mov->fc, AV_LOG_ERROR, "streeeeeeeam %d, offset 0x%"PRIx64": partial file\n",
                    sc->ffindex, sample->pos);
             pkt->flags |= AV_PKT_FLAG_MP4_PF;
