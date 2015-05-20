@@ -4245,8 +4245,6 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         goto retry;
     }
     sc = st->priv_data;
-    /* must be done just before reading, to avoid infinite loop on sample */
-    sc->current_sample++;
 
     if (mov->next_root_atom) {
         sample->pos = FFMIN(sample->pos, mov->next_root_atom);
@@ -4284,6 +4282,9 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         }
 #endif
     }
+
+    /* increase current_sample after reading, to avoid discontinuous sample */
+    sc->current_sample++;
 
     pkt->stream_index = sc->ffindex;
     pkt->dts = sample->timestamp;
