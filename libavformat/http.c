@@ -97,6 +97,7 @@ typedef struct HTTPContext {
     char *method;
     int reconnect;
     int listen;
+    char *tcp_hook;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -129,6 +130,7 @@ static const AVOption options[] = {
     { "method", "Override the HTTP method or set the expected HTTP method from a client", OFFSET(method), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
     { "reconnect", "auto reconnect after disconnect before EOF", OFFSET(reconnect), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, D },
     { "listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, D | E },
+    { "http-tcp-hook", "hook protocol on tcp", OFFSET(tcp_hook), AV_OPT_TYPE_STRING, { .str = "tcp" }, 0, 0, D | E },
     { NULL }
 };
 
@@ -156,6 +158,8 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
     char buf[1024], urlbuf[MAX_URL_SIZE];
     int port, use_proxy, err, location_changed = 0;
     HTTPContext *s = h->priv_data;
+
+    lower_proto = s->tcp_hook;
 
     av_url_split(proto, sizeof(proto), auth, sizeof(auth),
                  hostname, sizeof(hostname), &port,
@@ -1423,7 +1427,7 @@ static int http_proxy_open(URLContext *h, const char *uri, int flags)
     if (*path == '/')
         path++;
 
-    ff_url_join(lower_url, sizeof(lower_url), "tcp", NULL, hostname, port,
+    ff_url_join(lower_url, sizeof(lower_url), s->tcp_hook, NULL, hostname, port,
                 NULL);
 redo:
     ret = ffurl_open(&s->hd, lower_url, AVIO_FLAG_READ_WRITE,
