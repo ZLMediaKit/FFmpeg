@@ -312,6 +312,7 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
     if (cat->options)
         av_dict_copy(&tmp, cat->options, 0);
 
+    av_dict_set_int(&tmp, "ijkinject-segment-index", fileno, 0);
     ret = avformat_open_input(&new_avf, url, NULL, &tmp);
     if (fsc.url_free)
         fsc.url_free(fsc.url);
