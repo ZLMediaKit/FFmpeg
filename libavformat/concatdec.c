@@ -367,6 +367,9 @@ static int concat_read_header(AVFormatContext *avf, AVDictionary **options)
     ConcatFile *file = NULL;
     int64_t time = 0;
 
+    if (options && *options)
+        av_dict_copy(&cat->options, *options, 0);
+
     while (1) {
         if ((ret = ff_get_line(avf->pb, buf, sizeof(buf))) <= 0)
             break;
