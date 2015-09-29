@@ -1013,17 +1013,6 @@ static int open_input(HLSContext *c, struct playlist *pls)
 
     if (seg->key_type == KEY_NONE) {
         ret = open_url(pls->parent->priv_data, &pls->input, seg->url, opts);
-        for (int i = 0; i < 3; ++i) {
-            if (ff_check_interrupt(&pls->parent->interrupt_callback))
-                return AVERROR_EXIT;
-
-            ret = open_url(pls->parent->priv_data, &pls->input, seg->url, opts);
-            if (ret == 0)
-                break;
-
-            av_log(NULL, AV_LOG_ERROR, "failed to open segment, retry...");
-        }
-        goto cleanup;
     } else if (seg->key_type == KEY_AES_128) {
 //         HLSContext *c = var->parent->priv_data;
         char iv[33], key[33], url[MAX_URL_SIZE];
