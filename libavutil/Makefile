@@ -72,6 +72,7 @@ HEADERS = adler32.h                                                     \
           version.h                                                     \
           xtea.h                                                        \
           tea.h                                                         \
+          thread.h                                                      \
 
 HEADERS-$(CONFIG_LZO)                   += lzo.h
 
