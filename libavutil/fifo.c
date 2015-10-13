@@ -148,6 +148,35 @@ int av_fifo_generic_write(AVFifoBuffer *f, void *src, int size,
     return total - size;
 }
 
+int av_fifo_generic_peek_at(AVFifoBuffer *f, void *dest, int offset, int buf_size, void (*func)(void*, void*, int))
+{
+    uint8_t *rptr = f->rptr + offset;
+    uint32_t rndx = f->rndx + offset;
+
+    av_assert2(offset >= 0);
+    while (buf_size > 0) {
+        int len;
+
+        if (rptr >= f->end)
+            rptr -= f->end - f->buffer;
+
+        av_assert2(rndx < f->wndx);
+        len = FFMIN(f->end - rptr, buf_size);
+        if (func)
+            func(dest, rptr, len);
+        else {
+            memcpy(dest, rptr, len);
+            dest = (uint8_t *)dest + len;
+        }
+
+        buf_size -= len;
+        rptr     += len;
+        rndx     += len;
+    }
+
+    return 0;
+}
+
 int av_fifo_generic_peek(AVFifoBuffer *f, void *dest, int buf_size,
                          void (*func)(void *, void *, int))
 {
@@ -220,6 +249,14 @@ int main(void)
     for (i = -n + 1; i < n; i++) {
         int *v = (int *)av_fifo_peek2(fifo, i * sizeof(int));
         printf("%d: %d\n", i, *v);
+    }
+    printf("\n");
+
+    /* peek_at at FIFO */
+    n = av_fifo_size(fifo) / sizeof(int);
+    for (i = 0; i < n; i++) {
+        av_fifo_generic_peek_at(fifo, &j, i * sizeof(int), sizeof(j), NULL);
+        printf("%d: %d\n", i, j);
     }
     printf("\n");
 
