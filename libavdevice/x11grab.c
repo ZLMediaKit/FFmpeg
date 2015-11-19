@@ -268,7 +268,7 @@ static int x11grab_read_header(AVFormatContext *s1)
     XColor color[256];
     int i;
 
-    dpyname = av_strdup(s1->filename);
+    dpyname = av_strdup(s1->filename2);
     if (!dpyname)
         goto out;
 
@@ -286,7 +286,7 @@ static int x11grab_read_header(AVFormatContext *s1)
 
     av_log(s1, AV_LOG_INFO,
            "device: %s -> display: %s x: %d y: %d width: %d height: %d\n",
-           s1->filename, dpyname, x_off, y_off, x11grab->width, x11grab->height);
+           s1->filename2, dpyname, x_off, y_off, x11grab->width, x11grab->height);
 
     dpy = XOpenDisplay(dpyname);
     av_freep(&dpyname);

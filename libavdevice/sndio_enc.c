@@ -38,7 +38,7 @@ static av_cold int audio_write_header(AVFormatContext *s1)
     s->sample_rate = st->codec->sample_rate;
     s->channels    = st->codec->channels;
 
-    ret = ff_sndio_open(s1, 1, s1->filename);
+    ret = ff_sndio_open(s1, 1, s1->filename2);
 
     return ret;
 }

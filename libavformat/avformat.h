@@ -1337,12 +1337,10 @@ typedef struct AVFormatContext {
     AVStream **streams;
 
     /**
-     * input or output filename
-     *
-     * - demuxing: set by avformat_open_input()
-     * - muxing: may be set by the caller before avformat_write_header()
+     * @deprecated this field is unused, use filename2 instead
      */
-    char filename[1024];
+    //attribute_deprecated
+    //char filename[1024];
 
     /**
      * Position of the first frame of the component, in
@@ -1792,6 +1790,14 @@ typedef struct AVFormatContext {
      * Demuxing: Set by user.
      */
     int (*open_cb)(struct AVFormatContext *s, AVIOContext **p, const char *url, int flags, const AVIOInterruptCB *int_cb, AVDictionary **options);
+
+    /**
+     * input or output filename
+     *
+     * - demuxing: set by avformat_open_input()
+     * - muxing: may be set by the caller before avformat_write_header()
+     */
+    char *filename2;
 } AVFormatContext;
 
 int av_format_get_probe_score(const AVFormatContext *s);

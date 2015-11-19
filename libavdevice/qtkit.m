@@ -169,7 +169,7 @@ static int qtkit_read_header(AVFormatContext *s)
 
     // check for device index given in filename
     if (ctx->video_device_index == -1) {
-        sscanf(s->filename, "%d", &ctx->video_device_index);
+        sscanf(s->filename2, "%d", &ctx->video_device_index);
     }
 
     if (ctx->video_device_index >= 0) {
@@ -181,12 +181,12 @@ static int qtkit_read_header(AVFormatContext *s)
         }
 
         video_device = [devices objectAtIndex:ctx->video_device_index];
-    } else if (strncmp(s->filename, "",        1) &&
-               strncmp(s->filename, "default", 7)) {
+    } else if (strncmp(s->filename2, "",        1) &&
+               strncmp(s->filename2, "default", 7)) {
         NSArray *devices = [QTCaptureDevice inputDevicesWithMediaType:QTMediaTypeVideo];
 
         for (QTCaptureDevice *device in devices) {
-            if (!strncmp(s->filename, [[device localizedDisplayName] UTF8String], strlen(s->filename))) {
+            if (!strncmp(s->filename2, [[device localizedDisplayName] UTF8String], strlen(s->filename2))) {
                 video_device = device;
                 break;
             }

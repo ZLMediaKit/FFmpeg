@@ -237,7 +237,7 @@ static int sdl_write_header(AVFormatContext *s)
     int i, ret;
 
     if (!sdl->window_title)
-        sdl->window_title = av_strdup(s->filename);
+        sdl->window_title = av_strdup(s->filename2);
     if (!sdl->icon_title)
         sdl->icon_title = av_strdup(sdl->window_title);
 

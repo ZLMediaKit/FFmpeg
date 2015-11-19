@@ -336,7 +336,7 @@ static void log_slave(TeeSlave *slave, void *log_ctx, int log_level)
 {
     int i;
     av_log(log_ctx, log_level, "filename:'%s' format:%s\n",
-           slave->avf->filename, slave->avf->oformat->name);
+           slave->avf->filename2, slave->avf->oformat->name);
     for (i = 0; i < slave->avf->nb_streams; i++) {
         AVStream *st = slave->avf->streams[i];
         AVBitStreamFilterContext *bsf = slave->bsfs[i];
@@ -360,7 +360,7 @@ static int tee_write_header(AVFormatContext *avf)
 {
     TeeContext *tee = avf->priv_data;
     unsigned nb_slaves = 0, i;
-    const char *filename = avf->filename;
+    const char *filename = avf->filename2;
     char *slaves[MAX_SLAVES];
     int ret;
 
@@ -433,7 +433,7 @@ static int filter_packet(void *log_ctx, AVPacket *pkt,
         if (ret < 0) {
             av_log(log_ctx, AV_LOG_ERROR,
                 "Failed to filter bitstream with filter %s for stream %d in file '%s' with codec %s\n",
-                bsf_ctx->filter->name, pkt->stream_index, fmt_ctx->filename,
+                bsf_ctx->filter->name, pkt->stream_index, fmt_ctx->filename2,
                 avcodec_get_name(enc_ctx->codec_id));
         }
         *pkt = new_pkt;

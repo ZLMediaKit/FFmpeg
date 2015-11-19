@@ -762,7 +762,7 @@ int av_sdp_create(AVFormatContext *ac[], int n_files, char *buf, int size)
     port = 0;
     ttl = 0;
     if (n_files == 1) {
-        port = sdp_get_address(dst, sizeof(dst), &ttl, ac[0]->filename);
+        port = sdp_get_address(dst, sizeof(dst), &ttl, ac[0]->filename2);
         is_multicast = resolve_destination(dst, sizeof(dst), dst_type,
                                            sizeof(dst_type));
         if (!is_multicast)
@@ -782,7 +782,7 @@ int av_sdp_create(AVFormatContext *ac[], int n_files, char *buf, int size)
     dst[0] = 0;
     for (i = 0; i < n_files; i++) {
         if (n_files != 1) {
-            port = sdp_get_address(dst, sizeof(dst), &ttl, ac[i]->filename);
+            port = sdp_get_address(dst, sizeof(dst), &ttl, ac[i]->filename2);
             is_multicast = resolve_destination(dst, sizeof(dst), dst_type,
                                                sizeof(dst_type));
             if (!is_multicast)

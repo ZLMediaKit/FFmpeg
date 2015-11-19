@@ -3466,8 +3466,8 @@ static int webm_dash_manifest_read_header(AVFormatContext *s)
     }
 
     // basename of the file
-    buf = strrchr(s->filename, '/');
-    av_dict_set(&s->streams[0]->metadata, FILENAME, buf ? ++buf : s->filename, 0);
+    buf = strrchr(s->filename2, '/');
+    av_dict_set(&s->streams[0]->metadata, FILENAME, buf ? ++buf : s->filename2, 0);
 
     // track number
     tracks = matroska->tracks.elem;

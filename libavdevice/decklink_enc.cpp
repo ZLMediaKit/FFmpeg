@@ -344,7 +344,7 @@ av_cold int ff_decklink_write_header(AVFormatContext *avctx)
     while (iter->Next(&dl) == S_OK) {
         const char *displayName;
         ff_decklink_get_display_name(dl, &displayName);
-        if (!strcmp(avctx->filename, displayName)) {
+        if (!strcmp(avctx->filename2, displayName)) {
             av_free((void *) displayName);
             ctx->dl = dl;
             break;
@@ -354,14 +354,14 @@ av_cold int ff_decklink_write_header(AVFormatContext *avctx)
     }
     iter->Release();
     if (!ctx->dl) {
-        av_log(avctx, AV_LOG_ERROR, "Could not open '%s'\n", avctx->filename);
+        av_log(avctx, AV_LOG_ERROR, "Could not open '%s'\n", avctx->filename2);
         return AVERROR(EIO);
     }
 
     /* Get output device. */
     if (ctx->dl->QueryInterface(IID_IDeckLinkOutput, (void **) &ctx->dlo) != S_OK) {
         av_log(avctx, AV_LOG_ERROR, "Could not open output device from '%s'\n",
-               avctx->filename);
+               avctx->filename2);
         ctx->dl->Release();
         return AVERROR(EIO);
     }

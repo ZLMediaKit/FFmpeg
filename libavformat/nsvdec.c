@@ -497,7 +497,7 @@ static int nsv_read_header(AVFormatContext *s)
     int i, err;
 
     av_log(s, AV_LOG_TRACE, "%s()\n", __FUNCTION__);
-    av_log(s, AV_LOG_TRACE, "filename '%s'\n", s->filename);
+    av_log(s, AV_LOG_TRACE, "filename '%s'\n", s->filename2);
 
     nsv->state = NSV_UNSYNC;
     nsv->ahead[0].data = nsv->ahead[1].data = NULL;

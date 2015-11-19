@@ -311,7 +311,7 @@ static int gxf_write_material_data_section(AVFormatContext *s)
     AVIOContext *pb = s->pb;
     int64_t pos;
     int len;
-    const char *filename = strrchr(s->filename, '/');
+    const char *filename = strrchr(s->filename2, '/');
 
     pos = avio_tell(pb);
     avio_wb16(pb, 0); /* size */
@@ -320,7 +320,7 @@ static int gxf_write_material_data_section(AVFormatContext *s)
     if (filename)
         filename++;
     else
-        filename = s->filename;
+        filename = s->filename2;
     len = strlen(filename);
 
     avio_w8(pb, MAT_NAME);

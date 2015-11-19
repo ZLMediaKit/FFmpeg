@@ -51,9 +51,9 @@ static int write_header(AVFormatContext *s)
     VideoMuxData *img = s->priv_data;
     AVStream *st = s->streams[0];
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(st->codec->pix_fmt);
-    const char *proto = avio_find_protocol_name(s->filename);
+    const char *proto = avio_find_protocol_name(s->filename2);
 
-    av_strlcpy(img->path, s->filename, sizeof(img->path));
+    av_strlcpy(img->path, s->filename2, sizeof(img->path));
 
     /* find format */
     if (s->oformat->flags & AVFMT_NOFILE)
@@ -150,7 +150,7 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
 
         av_assert0(!img->split_planes);
 
-        ret = avformat_alloc_output_context2(&fmt, NULL, img->muxer, s->filename);
+        ret = avformat_alloc_output_context2(&fmt, NULL, img->muxer, s->filename2);
         if (ret < 0)
             return ret;
         st = avformat_new_stream(fmt, NULL);

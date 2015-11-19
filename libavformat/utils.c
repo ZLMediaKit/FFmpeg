@@ -458,7 +458,9 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     }
 
     s->duration = s->start_time = AV_NOPTS_VALUE;
-    av_strlcpy(s->filename, filename ? filename : "", sizeof(s->filename));
+    ret = avpriv_set_format_filename(s, filename ? filename : "");
+    if (ret < 0)
+        goto fail;
 
     /* Allocate private data. */
     if (s->iformat->priv_data_size > 0) {
@@ -1802,7 +1804,7 @@ void ff_configure_buffers_for_index(AVFormatContext *s, int64_t time_tolerance)
     int64_t pos_delta = 0;
     int64_t skip = 0;
     //We could use URLProtocol flags here but as many user applications do not use URLProtocols this would be unreliable
-    const char *proto = avio_find_protocol_name(s->filename);
+    const char *proto = avio_find_protocol_name(s->filename2);
 
     if (!proto) {
         av_log(s, AV_LOG_INFO,
@@ -4629,4 +4631,28 @@ uint8_t *ff_stream_new_side_data(AVStream *st, enum AVPacketSideDataType type,
     sd->data = data;
     sd->size = size;
     return data;
+}
+
+int avpriv_set_format_filename(AVFormatContext *s, const char *filename)
+{
+    char *new_filename;
+
+    if (!s || !filename)
+        return AVERROR(EINVAL);
+
+    if (strlen(filename) >= 1024)
+        new_filename = av_strdup(filename);
+    else {
+        // make sure there are at least 1024 bytes, for backward compatibility
+        new_filename = av_mallocz(1024);
+        av_strlcpy(new_filename, filename, 1024);
+    }
+    if (!new_filename) {
+        av_log(s, AV_LOG_ERROR, "Out of memory\n");
+        return AVERROR(ENOMEM);
+    }
+
+    av_freep(s->filename2);
+    s->filename2 = new_filename;
+    return 0;
 }

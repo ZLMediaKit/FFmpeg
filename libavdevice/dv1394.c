@@ -89,7 +89,7 @@ static int dv1394_read_header(AVFormatContext * context)
         goto failed;
 
     /* Open and initialize DV1394 device */
-    dv->fd = avpriv_open(context->filename, O_RDONLY);
+    dv->fd = avpriv_open(context->filename2, O_RDONLY);
     if (dv->fd < 0) {
         av_log(context, AV_LOG_ERROR, "Failed to open DV interface: %s\n", strerror(errno));
         goto failed;

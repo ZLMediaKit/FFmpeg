@@ -393,7 +393,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
         return AVERROR_EXIT;
     }
 
-    strcpy (fname, avctx->filename);
+    strcpy (fname, avctx->filename2);
     tmp=strchr (fname, '@');
     if (tmp != NULL) {
         mode_num = atoi (tmp+1);
@@ -421,7 +421,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     /* Get input device. */
     if (ctx->dl->QueryInterface(IID_IDeckLinkInput, (void **) &ctx->dli) != S_OK) {
         av_log(avctx, AV_LOG_ERROR, "Could not open output device from '%s'\n",
-               avctx->filename);
+               avctx->filename2);
         ctx->dl->Release();
         return AVERROR(EIO);
     }

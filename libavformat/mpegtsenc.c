@@ -909,7 +909,7 @@ static int mpegts_write_header(AVFormatContext *s)
            ts->sdt_packet_period, ts->pat_packet_period);
 
     if (ts->m2ts_mode == -1) {
-        if (av_match_ext(s->filename, "m2ts")) {
+        if (av_match_ext(s->filename2, "m2ts")) {
             ts->m2ts_mode = 1;
         } else {
             ts->m2ts_mode = 0;

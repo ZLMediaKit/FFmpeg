@@ -97,8 +97,8 @@ static int rtmp_open(URLContext *s, const char *uri, int flags)
     LibRTMPContext *ctx = s->priv_data;
     RTMP *r = &ctx->rtmp;
     int rc = 0, level;
-    char *filename = s->filename;
-    int len = strlen(s->filename) + 1;
+    char *filename = s->filename2;
+    int len = strlen(s->filename2) + 1;
 
     switch (av_log_get_level()) {
     default:
@@ -158,7 +158,7 @@ static int rtmp_open(URLContext *s, const char *uri, int flags)
     if (!(ctx->temp_filename = filename = av_malloc(len)))
         return AVERROR(ENOMEM);
 
-    av_strlcpy(filename, s->filename, len);
+    av_strlcpy(filename, s->filename2, len);
     if (ctx->app) {
         av_strlcat(filename, " app=", len);
         av_strlcat(filename, ctx->app, len);

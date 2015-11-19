@@ -145,11 +145,11 @@ static int device_open(AVFormatContext *ctx)
         flags |= O_NONBLOCK;
     }
 
-    fd = v4l2_open(ctx->filename, flags, 0);
+    fd = v4l2_open(ctx->filename2, flags, 0);
     if (fd < 0) {
         err = AVERROR(errno);
         av_log(ctx, AV_LOG_ERROR, "Cannot open video device %s: %s\n",
-               ctx->filename, av_err2str(err));
+               ctx->filename2, av_err2str(err));
         return err;
     }
 

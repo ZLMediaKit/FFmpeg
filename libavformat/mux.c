@@ -186,8 +186,11 @@ int avformat_alloc_output_context2(AVFormatContext **avctx, AVOutputFormat *ofor
     } else
         s->priv_data = NULL;
 
-    if (filename)
-        av_strlcpy(s->filename, filename, sizeof(s->filename));
+    if (filename) {
+        ret = avpriv_set_format_filename(s, filename);
+        if (ret < 0)
+            goto nomem;
+    }
     *avctx = s;
     return 0;
 nomem:

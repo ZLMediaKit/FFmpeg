@@ -447,7 +447,7 @@ static int write_manifest(AVFormatContext *s, int final)
     int ret, i;
     AVDictionaryEntry *title = av_dict_get(s->metadata, "title", NULL, 0);
 
-    snprintf(temp_filename, sizeof(temp_filename), "%s.tmp", s->filename);
+    snprintf(temp_filename, sizeof(temp_filename), "%s.tmp", s->filename2);
     ret = avio_open2(&out, temp_filename, AVIO_FLAG_WRITE, &s->interrupt_callback, NULL);
     if (ret < 0) {
         av_log(s, AV_LOG_ERROR, "Unable to open %s for writing\n", temp_filename);
@@ -549,7 +549,7 @@ static int write_manifest(AVFormatContext *s, int final)
     avio_printf(out, "</MPD>\n");
     avio_flush(out);
     avio_close(out);
-    return ff_rename(temp_filename, s->filename, s);
+    return ff_rename(temp_filename, s->filename2, s);
 }
 
 static int dash_write_header(AVFormatContext *s)
@@ -566,14 +566,14 @@ static int dash_write_header(AVFormatContext *s)
         c->use_template = 0;
     c->ambiguous_frame_rate = 0;
 
-    av_strlcpy(c->dirname, s->filename, sizeof(c->dirname));
+    av_strlcpy(c->dirname, s->filename2, sizeof(c->dirname));
     ptr = strrchr(c->dirname, '/');
     if (ptr) {
         av_strlcpy(basename, &ptr[1], sizeof(basename));
         ptr[1] = '\0';
     } else {
         c->dirname[0] = '\0';
-        av_strlcpy(basename, s->filename, sizeof(basename));
+        av_strlcpy(basename, s->filename2, sizeof(basename));
     }
 
     ptr = strrchr(basename, '.');
@@ -696,7 +696,7 @@ static int dash_write_header(AVFormatContext *s)
     }
     ret = write_manifest(s, 0);
     if (!ret)
-        av_log(s, AV_LOG_VERBOSE, "Manifest written to: %s\n", s->filename);
+        av_log(s, AV_LOG_VERBOSE, "Manifest written to: %s\n", s->filename2);
 
 fail:
     if (ret)
@@ -991,7 +991,7 @@ static int dash_write_trailer(AVFormatContext *s)
             snprintf(filename, sizeof(filename), "%s%s", c->dirname, os->initfile);
             unlink(filename);
         }
-        unlink(s->filename);
+        unlink(s->filename2);
     }
 
     dash_free(s);

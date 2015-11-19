@@ -146,7 +146,7 @@ static int hls_delete_old_segments(HLSContext *hls) {
         if (hls->segment_filename) {
             dirname = av_strdup(hls->segment_filename);
         } else {
-            dirname = av_strdup(hls->avf->filename);
+            dirname = av_strdup(hls->avf->filename2);
         }
         if (!dirname) {
             ret = AVERROR(ENOMEM);
@@ -311,10 +311,10 @@ static int hls_append_segment(HLSContext *hls, double duration, int64_t pos,
     if (!en)
         return AVERROR(ENOMEM);
 
-    av_strlcpy(en->filename, av_basename(hls->avf->filename), sizeof(en->filename));
+    av_strlcpy(en->filename, av_basename(hls->avf->filename2), sizeof(en->filename));
 
     if(hls->has_subtitle)
-        av_strlcpy(en->sub_filename, av_basename(hls->vtt_avf->filename), sizeof(en->sub_filename));
+        av_strlcpy(en->sub_filename, av_basename(hls->vtt_avf->filename2), sizeof(en->sub_filename));
     else
         en->sub_filename[0] = '\0';
 
@@ -382,7 +382,7 @@ static int hls_window(AVFormatContext *s, int last)
     char temp_filename[1024];
     int64_t sequence = FFMAX(hls->start_sequence, hls->sequence - hls->nb_entries);
     int version = hls->flags & HLS_SINGLE_FILE ? 4 : 3;
-    const char *proto = avio_find_protocol_name(s->filename);
+    const char *proto = avio_find_protocol_name(s->filename2);
     int use_rename = proto && !strcmp(proto, "file");
     static unsigned warned_non_file;
     char *key_uri = NULL;
@@ -393,7 +393,7 @@ static int hls_window(AVFormatContext *s, int last)
         av_log(s, AV_LOG_ERROR, "Cannot use rename on non file protocol, this may lead to races and temporarly partial files\n");
 
     set_http_options(&options, hls);
-    snprintf(temp_filename, sizeof(temp_filename), use_rename ? "%s.tmp" : "%s", s->filename);
+    snprintf(temp_filename, sizeof(temp_filename), use_rename ? "%s.tmp" : "%s", s->filename2);
     if ((ret = avio_open2(&out, temp_filename, AVIO_FLAG_WRITE,
                           &s->interrupt_callback, &options)) < 0)
         goto fail;
@@ -479,7 +479,7 @@ fail:
     avio_closep(&out);
     avio_closep(&sub_out);
     if (ret >= 0 && use_rename)
-        ff_rename(temp_filename, s->filename, s);
+        ff_rename(temp_filename, s->filename2, s);
     return ret;
 }
 
@@ -490,34 +490,49 @@ static int hls_start(AVFormatContext *s)
     AVFormatContext *vtt_oc = c->vtt_avf;
     AVDictionary *options = NULL;
     char *filename, iv_string[KEYSIZE*2 + 1];
+    char new_filename[1024];
     int err = 0;
 
     if (c->flags & HLS_SINGLE_FILE) {
-        av_strlcpy(oc->filename, c->basename,
-                   sizeof(oc->filename));
-        if (c->vtt_basename)
-            av_strlcpy(vtt_oc->filename, c->vtt_basename,
-                  sizeof(vtt_oc->filename));
+        err = avpriv_set_format_filename(oc, c->basename);
+        if (err < 0)
+            return err;
+        if (c->vtt_basename) {
+            err = avpriv_set_format_filename(vtt_oc, c->vtt_basename);
+            if (err < 0)
+                return err;
+        }
     } else {
         if (c->use_localtime) {
             time_t now0;
             struct tm *tm, tmpbuf;
             time(&now0);
             tm = localtime_r(&now0, &tmpbuf);
-            if (!strftime(oc->filename, sizeof(oc->filename), c->basename, tm)) {
+            if (!strftime(new_filename, sizeof(new_filename), c->basename, tm)) {
                 av_log(oc, AV_LOG_ERROR, "Could not get segment filename with use_localtime\n");
                 return AVERROR(EINVAL);
             }
-       } else if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
+            err = avpriv_set_format_filename(oc, new_filename);
+            if (err < 0)
+                return err;
+        } else if (av_get_frame_filename(new_filename, sizeof(new_filename),
                                   c->basename, c->wrap ? c->sequence % c->wrap : c->sequence) < 0) {
             av_log(oc, AV_LOG_ERROR, "Invalid segment filename template '%s' you can try use -use_localtime 1 with it\n", c->basename);
             return AVERROR(EINVAL);
+        } else {
+            err = avpriv_set_format_filename(oc, new_filename);
+            if (err < 0)
+                return err;
         }
         if( c->vtt_basename) {
-            if (av_get_frame_filename(vtt_oc->filename, sizeof(vtt_oc->filename),
+            if (av_get_frame_filename(new_filename, sizeof(new_filename),
                               c->vtt_basename, c->wrap ? c->sequence % c->wrap : c->sequence) < 0) {
                 av_log(vtt_oc, AV_LOG_ERROR, "Invalid segment filename template '%s'\n", c->vtt_basename);
                 return AVERROR(EINVAL);
+            } else {
+                err = avpriv_set_format_filename(oc, new_filename);
+                if (err < 0)
+                    return err;
             }
        }
     }
@@ -537,7 +552,7 @@ static int hls_start(AVFormatContext *s)
         if ((err = av_dict_set(&options, "encryption_iv", iv_string, 0)) < 0)
            goto fail;
 
-        filename = av_asprintf("crypto:%s", oc->filename);
+        filename = av_asprintf("crypto:%s", oc->filename2);
         if (!filename) {
             err = AVERROR(ENOMEM);
             goto fail;
@@ -549,12 +564,12 @@ static int hls_start(AVFormatContext *s)
         if (err < 0)
             return err;
     } else
-        if ((err = avio_open2(&oc->pb, oc->filename, AVIO_FLAG_WRITE,
+        if ((err = avio_open2(&oc->pb, oc->filename2, AVIO_FLAG_WRITE,
                           &s->interrupt_callback, &options)) < 0)
             goto fail;
     if (c->vtt_basename) {
         set_http_options(&options, c);
-        if ((err = avio_open2(&vtt_oc->pb, vtt_oc->filename, AVIO_FLAG_WRITE,
+        if ((err = avio_open2(&vtt_oc->pb, vtt_oc->filename2, AVIO_FLAG_WRITE,
                          &s->interrupt_callback, &options)) < 0)
             goto fail;
     }
@@ -643,9 +658,9 @@ static int hls_write_header(AVFormatContext *s)
             pattern = ".ts";
 
         if (hls->use_localtime) {
-            basename_size = strlen(s->filename) + strlen(pattern_localtime_fmt) + 1;
+            basename_size = strlen(s->filename2) + strlen(pattern_localtime_fmt) + 1;
         } else {
-            basename_size = strlen(s->filename) + strlen(pattern) + 1;
+            basename_size = strlen(s->filename2) + strlen(pattern) + 1;
         }
         hls->basename = av_malloc(basename_size);
         if (!hls->basename) {
@@ -653,7 +668,7 @@ static int hls_write_header(AVFormatContext *s)
             goto fail;
         }
 
-        av_strlcpy(hls->basename, s->filename, basename_size);
+        av_strlcpy(hls->basename, s->filename2, basename_size);
 
         p = strrchr(hls->basename, '.');
         if (p)
@@ -669,7 +684,7 @@ static int hls_write_header(AVFormatContext *s)
 
         if (hls->flags & HLS_SINGLE_FILE)
             vtt_pattern = ".vtt";
-        vtt_basename_size = strlen(s->filename) + strlen(vtt_pattern) + 1;
+        vtt_basename_size = strlen(s->filename2) + strlen(vtt_pattern) + 1;
         hls->vtt_basename = av_malloc(vtt_basename_size);
         if (!hls->vtt_basename) {
             ret = AVERROR(ENOMEM);
@@ -680,7 +695,7 @@ static int hls_write_header(AVFormatContext *s)
             ret = AVERROR(ENOMEM);
             goto fail;
         }
-        av_strlcpy(hls->vtt_basename, s->filename, vtt_basename_size);
+        av_strlcpy(hls->vtt_basename, s->filename2, vtt_basename_size);
         p = strrchr(hls->vtt_basename, '.');
         if (p)
             *p = '\0';

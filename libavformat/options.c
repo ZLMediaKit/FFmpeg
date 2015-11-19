@@ -123,6 +123,13 @@ AVFormatContext *avformat_alloc_context(void)
     ic->internal->offset = AV_NOPTS_VALUE;
     ic->internal->raw_packet_buffer_remaining_size = RAW_PACKET_BUFFER_SIZE;
 
+    // init filename2 with a buffer of 1024 bytes, for backward compatibility,
+    ic->filename2 = av_mallocz(1024);
+    if (!ic->filename2) {
+        avformat_free_context(ic);
+        return NULL;
+    }
+
     return ic;
 }
 

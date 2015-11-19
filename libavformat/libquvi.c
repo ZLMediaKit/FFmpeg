@@ -70,7 +70,7 @@ static int libquvi_read_header(AVFormatContext *s)
 
     quvi_setopt(q, QUVIOPT_FORMAT, qc->format);
 
-    rc = quvi_parse(q, s->filename, &m);
+    rc = quvi_parse(q, s->filename2, &m);
     if (rc != QUVI_OK) {
         av_log(s, AV_LOG_ERROR, "%s\n", quvi_strerror(q, rc));
         ret = AVERROR_EXTERNAL;

@@ -158,8 +158,8 @@ static av_cold int pulse_read_header(AVFormatContext *s)
 
     attr.fragsize = pd->fragment_size;
 
-    if (s->filename[0] != '\0' && strcmp(s->filename, "default"))
-        device = s->filename;
+    if (s->filename2[0] != '\0' && strcmp(s->filename2, "default"))
+        device = s->filename2;
 
     if (!(pd->mainloop = pa_threaded_mainloop_new())) {
         pulse_close(s);

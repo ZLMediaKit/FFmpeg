@@ -101,9 +101,9 @@ static int grab_read_header(AVFormatContext *s1, AVFormatParameters *ap)
         return AVERROR(ENOMEM);
     avpriv_set_pts_info(st, 64, 1, 1000000); /* 64 bits pts in us */
 
-    video_fd = open(s1->filename, O_RDWR);
+    video_fd = open(s1->filename2, O_RDWR);
     if (video_fd < 0) {
-        av_log(s1, AV_LOG_ERROR, "%s: %s\n", s1->filename, strerror(errno));
+        av_log(s1, AV_LOG_ERROR, "%s: %s\n", s1->filename2, strerror(errno));
         goto fail;
     }
 

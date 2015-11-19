@@ -2892,11 +2892,13 @@ static int prepare_sdp_description(FFServerStream *stream, uint8_t **pbuffer,
                 entry ? entry->value : "No Title", 0);
     avc->nb_streams = stream->nb_streams;
     if (stream->is_multicast) {
-        snprintf(avc->filename, 1024, "rtp://%s:%d?multicast=1?ttl=%d",
+        // FIXME: use a proper accessor
+        snprintf(avc->filename2, 1024, "rtp://%s:%d?multicast=1?ttl=%d",
                  inet_ntoa(stream->multicast_ip),
                  stream->multicast_port, stream->multicast_ttl);
     } else
-        snprintf(avc->filename, 1024, "rtp://0.0.0.0");
+        // FIXME: use a proper accessor
+        snprintf(avc->filename2, 1024, "rtp://0.0.0.0");
 
     avc->streams = av_malloc_array(avc->nb_streams, sizeof(*avc->streams));
     if (!avc->streams)
@@ -3371,15 +3373,17 @@ static int rtp_new_av_stream(HTTPContext *c,
             ttl = c->stream->multicast_ttl;
             if (!ttl)
                 ttl = 16;
-            snprintf(ctx->filename, sizeof(ctx->filename),
+            // FIXME: use a proper accessor
+            snprintf(ctx->filename2, 1024,
                      "rtp://%s:%d?multicast=1&ttl=%d",
                      ipaddr, ntohs(dest_addr->sin_port), ttl);
         } else {
-            snprintf(ctx->filename, sizeof(ctx->filename),
+            // FIXME: use a proper accessor
+            snprintf(ctx->filename2, 1024,
                      "rtp://%s:%d", ipaddr, ntohs(dest_addr->sin_port));
         }
 
-        if (ffurl_open(&h, ctx->filename, AVIO_FLAG_WRITE, NULL, NULL) < 0)
+        if (ffurl_open(&h, ctx->filename2, AVIO_FLAG_WRITE, NULL, NULL) < 0)
             goto fail;
         c->rtp_handles[stream_index] = h;
         max_packet_size = h->max_packet_size;
@@ -3530,7 +3534,7 @@ static void extract_mpeg4_header(AVFormatContext *infile)
         return;
 
     printf("MPEG4 without extra data: trying to find header in %s\n",
-           infile->filename);
+           infile->filename2);
     while (mpeg4_count > 0) {
         if (av_read_frame(infile, &pkt) < 0)
             break;

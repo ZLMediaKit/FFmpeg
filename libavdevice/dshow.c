@@ -1012,7 +1012,7 @@ static int parse_device_name(AVFormatContext *avctx)
 {
     struct dshow_ctx *ctx = avctx->priv_data;
     char **device_name = ctx->device_name;
-    char *name = av_strdup(avctx->filename);
+    char *name = av_strdup(avctx->filename2);
     char *tmp = name;
     int ret = 1;
     char *type;

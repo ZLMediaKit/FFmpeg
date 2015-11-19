@@ -1509,7 +1509,7 @@ static int hls_read_header(AVFormatContext *s)
         update_options(&c->headers, "headers", u->priv_data);
     }
 
-    if ((ret = parse_playlist(c, s->filename, NULL, s->pb)) < 0)
+    if ((ret = parse_playlist(c, s->filename2, NULL, s->pb)) < 0)
         goto fail;
 
     if ((ret = save_avio_options(s)) < 0)

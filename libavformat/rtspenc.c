@@ -50,6 +50,7 @@ int ff_rtsp_setup_output_streams(AVFormatContext *s, const char *addr)
     int i;
     char *sdp;
     AVFormatContext sdp_ctx, *ctx_array[1];
+    char tmp_filename[1024];
 
     if (s->start_time_realtime == 0  ||  s->start_time_realtime == AV_NOPTS_VALUE)
         s->start_time_realtime = av_gettime();
@@ -71,8 +72,11 @@ int ff_rtsp_setup_output_streams(AVFormatContext *s, const char *addr)
      * flexible SDP creation interface.
      */
     sdp_ctx = *s;
-    ff_url_join(sdp_ctx.filename, sizeof(sdp_ctx.filename),
-                "rtsp", NULL, addr, -1, NULL);
+    /*
+     * FIXME: sdp_ctx.filename should not be modified any more.
+     */
+    av_strlcpy(tmp_filename, s->filename2, sizeof(tmp_filename));
+    sdp_ctx.filename2 = tmp_filename;
     ctx_array[0] = &sdp_ctx;
     if (av_sdp_create(ctx_array, 1, sdp, SDP_MAX_SIZE)) {
         av_free(sdp);

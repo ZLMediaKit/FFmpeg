@@ -523,4 +523,12 @@ int ff_copy_whitelists(AVFormatContext *dst, AVFormatContext *src);
 int ffio_open2_wrapper(struct AVFormatContext *s, AVIOContext **pb, const char *url, int flags,
                        const AVIOInterruptCB *int_cb, AVDictionary **options);
 
+/**
+ * Add a new chapter.
+ *
+ * @param filename new filename, should not be NULL
+ * @return 0 if OK, AVERROR_xxx on error
+ */
+int avpriv_set_format_filename(AVFormatContext *s, const char *filename);
+
 #endif /* AVFORMAT_INTERNAL_H */

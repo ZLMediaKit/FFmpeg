@@ -1162,9 +1162,9 @@ static int ipod_get_codec_tag(AVFormatContext *s, MOVTrack *track)
            tag == MKTAG('t', 'e', 'x', 't'))))
         tag = ff_codec_get_tag(codec_ipod_tags, track->enc->codec_id);
 
-    if (!av_match_ext(s->filename, "m4a") &&
-        !av_match_ext(s->filename, "m4b") &&
-        !av_match_ext(s->filename, "m4v"))
+    if (!av_match_ext(s->filename2, "m4a") &&
+        !av_match_ext(s->filename2, "m4b") &&
+        !av_match_ext(s->filename2, "m4v"))
         av_log(s, AV_LOG_WARNING, "Warning, extension is not .m4a, .m4v nor  .m4b "
                "Quicktime/Ipod might not play the file\n");
 
@@ -5432,10 +5432,10 @@ static int shift_data(AVFormatContext *s)
      * writing, so we re-open the same output, but for reading. It also avoids
      * a read/seek/write/seek back and forth. */
     avio_flush(s->pb);
-    ret = avio_open(&read_pb, s->filename, AVIO_FLAG_READ);
+    ret = avio_open(&read_pb, s->filename2, AVIO_FLAG_READ);
     if (ret < 0) {
         av_log(s, AV_LOG_ERROR, "Unable to re-open %s output file for "
-               "the second pass (faststart)\n", s->filename);
+               "the second pass (faststart)\n", s->filename2);
         goto end;
     }
 

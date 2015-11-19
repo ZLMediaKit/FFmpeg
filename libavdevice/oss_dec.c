@@ -57,7 +57,7 @@ static int audio_read_header(AVFormatContext *s1)
         return AVERROR(ENOMEM);
     }
 
-    ret = ff_oss_audio_open(s1, 0, s1->filename);
+    ret = ff_oss_audio_open(s1, 0, s1->filename2);
     if (ret < 0) {
         return AVERROR(EIO);
     }

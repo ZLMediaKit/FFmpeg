@@ -124,10 +124,10 @@ static int add_file(AVFormatContext *avf, char *filename, ConcatFile **rfile,
         url = filename;
         filename = NULL;
     } else {
-        url_len = strlen(avf->filename) + strlen(filename) + 16;
+        url_len = strlen(avf->filename2) + strlen(filename) + 16;
         if (!(url = av_malloc(url_len)))
             FAIL(AVERROR(ENOMEM));
-        ff_make_absolute_url(url, url_len, avf->filename, filename);
+        ff_make_absolute_url(url, url_len, avf->filename2, filename);
         av_freep(&filename);
     }
 

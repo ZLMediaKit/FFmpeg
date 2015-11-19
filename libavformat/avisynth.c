@@ -379,12 +379,12 @@ static int avisynth_open_file(AVFormatContext *s)
 
 #ifdef USING_AVISYNTH
     /* Convert UTF-8 to ANSI code page */
-    MultiByteToWideChar(CP_UTF8, 0, s->filename, -1, filename_wc, MAX_PATH * 4);
+    MultiByteToWideChar(CP_UTF8, 0, s->filename2, -1, filename_wc, MAX_PATH * 4);
     WideCharToMultiByte(CP_THREAD_ACP, 0, filename_wc, -1, filename_ansi,
                         MAX_PATH * 4, NULL, NULL);
     arg = avs_new_value_string(filename_ansi);
 #else
-    arg = avs_new_value_string(s->filename);
+    arg = avs_new_value_string(s->filename2);
 #endif
     val = avs_library.avs_invoke(avs->env, "Import", arg, 0);
     if (avs_is_error(val)) {

@@ -78,8 +78,8 @@ static av_cold int fbdev_read_header(AVFormatContext *avctx)
     if (avctx->flags & AVFMT_FLAG_NONBLOCK)
         flags |= O_NONBLOCK;
 
-    if (avctx->filename[0])
-        device = avctx->filename;
+    if (avctx->filename2[0])
+        device = avctx->filename2;
     else
         device = ff_fbdev_default_device();
 

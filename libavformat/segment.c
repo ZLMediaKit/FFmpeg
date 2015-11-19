@@ -183,6 +183,8 @@ static int set_segment_filename(AVFormatContext *s)
     SegmentContext *seg = s->priv_data;
     AVFormatContext *oc = seg->avf;
     size_t size;
+    char new_filename[1024];
+    int err;
 
     if (seg->segment_idx_wrap)
         seg->segment_idx %= seg->segment_idx_wrap;
@@ -191,18 +193,25 @@ static int set_segment_filename(AVFormatContext *s)
         struct tm *tm, tmpbuf;
         time(&now0);
         tm = localtime_r(&now0, &tmpbuf);
-        if (!strftime(oc->filename, sizeof(oc->filename), s->filename, tm)) {
+        if (!strftime(new_filename, sizeof(new_filename), s->filename2, tm)) {
             av_log(oc, AV_LOG_ERROR, "Could not get segment filename with strftime\n");
             return AVERROR(EINVAL);
         }
-    } else if (av_get_frame_filename(oc->filename, sizeof(oc->filename),
-                                     s->filename, seg->segment_idx) < 0) {
-        av_log(oc, AV_LOG_ERROR, "Invalid segment filename template '%s'\n", s->filename);
+        err = avpriv_set_format_filename(oc, new_filename);
+        if (err < 0)
+            return err;
+    } else if (av_get_frame_filename(new_filename, sizeof(new_filename),
+                                     s->filename2, seg->segment_idx) < 0) {
+        av_log(oc, AV_LOG_ERROR, "Invalid segment filename template '%s'\n", s->filename2);
         return AVERROR(EINVAL);
+    } else {
+        err = avpriv_set_format_filename(oc, new_filename);
+        if (err < 0)
+            return err;
     }
 
     /* copy modified name in list entry */
-    size = strlen(av_basename(oc->filename)) + 1;
+    size = strlen(av_basename(oc->filename2)) + 1;
     if (seg->entry_prefix)
         size += strlen(seg->entry_prefix);
 
@@ -211,7 +220,7 @@ static int set_segment_filename(AVFormatContext *s)
         return AVERROR(ENOMEM);
     snprintf(seg->cur_entry.filename, size, "%s%s",
              seg->entry_prefix ? seg->entry_prefix : "",
-             av_basename(oc->filename));
+             av_basename(oc->filename2));
 
     return 0;
 }
@@ -237,9 +246,9 @@ static int segment_start(AVFormatContext *s, int write_header)
     if ((err = set_segment_filename(s)) < 0)
         return err;
 
-    if ((err = avio_open2(&oc->pb, oc->filename, AVIO_FLAG_WRITE,
+    if ((err = avio_open2(&oc->pb, oc->filename2, AVIO_FLAG_WRITE,
                           &s->interrupt_callback, NULL)) < 0) {
-        av_log(s, AV_LOG_ERROR, "Failed to open segment '%s'\n", oc->filename);
+        av_log(s, AV_LOG_ERROR, "Failed to open segment '%s'\n", oc->filename2);
         return err;
     }
     if (!seg->individual_header_trailer)
@@ -340,7 +349,7 @@ static int segment_end(AVFormatContext *s, int write_trailer, int is_last)
 
     if (ret < 0)
         av_log(s, AV_LOG_ERROR, "Failure occurred when ending segment '%s'\n",
-               oc->filename);
+               oc->filename2);
 
     if (seg->list) {
         if (seg->list_size || seg->list_type == LIST_TYPE_M3U8) {
@@ -383,7 +392,7 @@ static int segment_end(AVFormatContext *s, int write_trailer, int is_last)
     }
 
     av_log(s, AV_LOG_VERBOSE, "segment:'%s' count:%d ended\n",
-           seg->avf->filename, seg->segment_count);
+           seg->avf->filename2, seg->segment_count);
     seg->segment_count++;
 
 end:
@@ -656,7 +665,7 @@ static int seg_write_header(AVFormatContext *s)
             if ((ret = segment_list_open(s)) < 0)
                 goto fail;
         } else {
-            const char *proto = avio_find_protocol_name(s->filename);
+            const char *proto = avio_find_protocol_name(s->filename2);
             seg->use_rename = proto && !strcmp(proto, "file");
         }
     }
@@ -669,7 +678,7 @@ static int seg_write_header(AVFormatContext *s)
            seg->reference_stream_index,
            av_get_media_type_string(s->streams[seg->reference_stream_index]->codec->codec_type));
 
-    seg->oformat = av_guess_format(seg->format, s->filename, NULL);
+    seg->oformat = av_guess_format(seg->format, s->filename2, NULL);
 
     if (!seg->oformat) {
         ret = AVERROR_MUXER_NOT_FOUND;
@@ -690,9 +699,9 @@ static int seg_write_header(AVFormatContext *s)
         goto fail;
 
     if (seg->write_header_trailer) {
-        if ((ret = avio_open2(&oc->pb, seg->header_filename ? seg->header_filename : oc->filename, AVIO_FLAG_WRITE,
+        if ((ret = avio_open2(&oc->pb, seg->header_filename ? seg->header_filename : oc->filename2, AVIO_FLAG_WRITE,
                               &s->interrupt_callback, NULL)) < 0) {
-            av_log(s, AV_LOG_ERROR, "Failed to open segment '%s'\n", oc->filename);
+            av_log(s, AV_LOG_ERROR, "Failed to open segment '%s'\n", oc->filename2);
             goto fail;
         }
         if (!seg->individual_header_trailer)
@@ -734,7 +743,7 @@ static int seg_write_header(AVFormatContext *s)
         } else {
             close_null_ctxp(&oc->pb);
         }
-        if ((ret = avio_open2(&oc->pb, oc->filename, AVIO_FLAG_WRITE,
+        if ((ret = avio_open2(&oc->pb, oc->filename2, AVIO_FLAG_WRITE,
                               &s->interrupt_callback, NULL)) < 0)
             goto fail;
         if (!seg->individual_header_trailer)
@@ -823,7 +832,7 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
 
     if (seg->segment_frame_count == 0) {
         av_log(s, AV_LOG_VERBOSE, "segment:'%s' starts with packet stream:%d pts:%s pts_time:%s frame:%d\n",
-               seg->avf->filename, pkt->stream_index,
+               seg->avf->filename2, pkt->stream_index,
                av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, &st->time_base), seg->frame_count);
     }
 

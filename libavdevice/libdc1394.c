@@ -225,7 +225,7 @@ static int dc1394_v1_read_header(AVFormatContext *c)
                                    fmt->frame_size_id,
                                    SPEED_400,
                                    fps->frame_rate_id, 8, 1,
-                                   c->filename,
+                                   c->filename2,
                                    &dc1394->camera);
     dc1394_free_camera_nodes(camera_nodes);
     if (res != DC1394_SUCCESS) {

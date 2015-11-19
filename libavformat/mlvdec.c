@@ -329,9 +329,9 @@ static int read_header(AVFormatContext *avctx)
         return ret;
 
     /* scan secondary files */
-    if (strlen(avctx->filename) > 2) {
+    if (strlen(avctx->filename2) > 2) {
         int i;
-        char *filename = av_strdup(avctx->filename);
+        char *filename = av_strdup(avctx->filename2);
         AVOpenCallback open_func = avctx->open_cb;
 
         if (!filename)

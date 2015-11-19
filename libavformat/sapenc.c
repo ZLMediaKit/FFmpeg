@@ -84,7 +84,7 @@ static int sap_write_header(AVFormatContext *s)
 
     /* extract hostname and port */
     av_url_split(NULL, 0, NULL, 0, host, sizeof(host), &base_port,
-                 path, sizeof(path), s->filename);
+                 path, sizeof(path), s->filename2);
     if (base_port < 0)
         base_port = 5004;
 
@@ -159,7 +159,9 @@ static int sap_write_header(AVFormatContext *s)
             goto fail;
         s->streams[i]->priv_data = contexts[i];
         s->streams[i]->time_base = contexts[i]->streams[0]->time_base;
-        av_strlcpy(contexts[i]->filename, url, sizeof(contexts[i]->filename));
+        ret = avpriv_set_format_filename(contexts[i], url);
+        if (ret < 0)
+            goto fail;
     }
 
     if (s->nb_streams > 0 && title)

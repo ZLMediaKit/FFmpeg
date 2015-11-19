@@ -53,8 +53,8 @@ static av_cold int fbdev_write_header(AVFormatContext *h)
         return AVERROR(EINVAL);
     }
 
-    if (h->filename[0])
-        device = h->filename;
+    if (h->filename2[0])
+        device = h->filename2;
     else
         device = ff_fbdev_default_device();
 
