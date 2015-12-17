@@ -528,6 +528,19 @@ static int update_frame_pool(AVCodecContext *avctx, AVFrame *frame)
             // NOTE: do not align linesizes individually, this breaks e.g. assumptions
             // that linesize[0] == 2*linesize[1] in the MPEG-encoder for 4:2:2
             av_image_fill_linesizes(picture.linesize, avctx->pix_fmt, w);
+            // FIXME: @bbcallen, better config at runtime
+#ifdef __APPLE__
+            if (avctx->codec_id == AV_CODEC_ID_H264) {
+                switch (avctx->pix_fmt) {
+                    case AV_PIX_FMT_YUV420P:
+                    case AV_PIX_FMT_YUVJ420P:
+                        for (int i = 0; i < 3; ++i) {
+                            picture.linesize[i] = 1 << (sizeof(int32_t) * 8 - __builtin_clz((int32_t)picture.linesize[i]));
+                        }
+                        break;
+                }
+            }
+#endif
             // increase alignment of w for next try (rhs gives the lowest bit set in w)
             w += w & ~(w - 1);
 
