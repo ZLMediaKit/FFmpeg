@@ -21,4 +21,22 @@
 #ifndef AVUTIL_APPLICATION_H
 #define AVUTIL_APPLICATION_H
 
+#include "libavutil/log.h"
+
+typedef struct AVApplicationContext AVApplicationContext;
+struct AVApplicationContext {
+    const AVClass *av_class;    /**< information for av_log(). Set by av_application_open(). */
+    void *opaque;               /**< user data. */
+
+    void (*func_did_tcp_connect_ip_port)(AVApplicationContext *h, int family, const char *ip, int port);
+};
+
+int  av_application_alloc(AVApplicationContext **ph, void *opaque);
+int  av_application_open(AVApplicationContext **ph, void *opaque);
+void av_application_close(AVApplicationContext *h);
+void av_application_closep(AVApplicationContext **ph);
+
+void av_application_did_tcp_connect_fd(AVApplicationContext *h, int fd);
+void av_application_did_tcp_connect_ip_port(AVApplicationContext *h, int family, const char *ip, int port);
+
 #endif /* AVUTIL_APPLICATION_H */

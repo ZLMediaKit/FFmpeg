@@ -19,3 +19,80 @@
  */
 
 #include "application.h"
+#include "libavformat/network.h"
+
+int av_application_alloc(AVApplicationContext **ph, void *opaque)
+{
+    AVApplicationContext *h = NULL;
+
+    h = av_mallocz(sizeof(AVApplicationContext));
+    if (!h)
+        return AVERROR(ENOMEM);
+
+    h->opaque = opaque;
+
+    *ph = h;
+    return 0;
+}
+
+int av_application_open(AVApplicationContext **ph, void *opaque)
+{
+    int ret = av_application_alloc(ph, opaque);
+    if (ret)
+        return ret;
+
+    return 0;
+}
+
+void av_application_close(AVApplicationContext *h)
+{
+    av_free(h);
+}
+
+void av_application_closep(AVApplicationContext **ph)
+{
+    if (!ph || !*ph)
+        return;
+
+    av_application_close(*ph);
+    *ph = NULL;
+}
+
+void av_application_did_tcp_connect_fd(AVApplicationContext *h, int fd)
+{
+    struct sockaddr_storage so_stg;
+    int       ret = 0;
+    socklen_t so_len = sizeof(so_stg);
+    int       so_family;
+    // char      so_ip_name[FFMAX(INET4_ADDRSTRLEN, INET6_ADDRSTRLEN)];
+    char      so_ip_name[96] = {0};
+
+    if (!h || !h->func_did_tcp_connect_ip_port || fd <= 0)
+        return;
+
+    ret = getpeername(fd, (struct sockaddr *)&so_stg, &so_len);
+    if (ret)
+        return;
+
+    so_family = ((struct sockaddr*)&so_stg)->sa_family;
+    switch (so_family) {
+        case AF_INET: {
+            struct sockaddr_in* in4 = (struct sockaddr_in*)&so_stg;
+            if (inet_ntop(AF_INET, &(in4->sin_addr), so_ip_name, sizeof(so_ip_name)))
+                av_application_did_tcp_connect_ip_port(h, AF_INET, so_ip_name, in4->sin_port);
+            break;
+        }
+        case AF_INET6: {
+            struct sockaddr_in6* in6 = (struct sockaddr_in6*)&so_stg;
+            if (inet_ntop(AF_INET6, &(in6->sin6_addr), so_ip_name, sizeof(so_ip_name)))
+                av_application_did_tcp_connect_ip_port(h, AF_INET6, so_ip_name, in6->sin6_port);
+            break;
+        }
+    }
+}
+
+void av_application_did_tcp_connect_ip_port(AVApplicationContext *h, int family, const char *ip, int port)
+{
+    if (h->func_did_tcp_connect_ip_port)
+        h->func_did_tcp_connect_ip_port(h, family, ip, port);
+}
