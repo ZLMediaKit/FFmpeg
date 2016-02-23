@@ -23,6 +23,7 @@
 #include "libavutil/parseutils.h"
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
+#include "libavutil/application.h"
 
 #include "internal.h"
 #include "network.h"
@@ -39,6 +40,7 @@ typedef struct TCPContext {
     int open_timeout;
     int rw_timeout;
     int listen_timeout;
+    AVApplicationContext *app_ctx;
 } TCPContext;
 
 #define OFFSET(x) offsetof(TCPContext, x)
@@ -48,6 +50,7 @@ static const AVOption options[] = {
     { "listen",          "Listen for incoming connections",  OFFSET(listen),         AV_OPT_TYPE_INT, { .i64 = 0 },     0,       2,       .flags = D|E },
     { "timeout",     "set timeout (in microseconds) of socket I/O operations", OFFSET(rw_timeout),     AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
     { "listen_timeout",  "Connection awaiting timeout (in milliseconds)",      OFFSET(listen_timeout), AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
+    { "ijkapplication",  "AVApplicationContext",             OFFSET(app_ctx),        AV_OPT_TYPE_INT64, { .i64 = 0 },   INT64_MIN, INT64_MAX, .flags = D },
     { NULL }
 };
 
@@ -140,12 +143,12 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     } else {
         if ((ret = ff_listen_connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen,
                                      s->open_timeout / 1000, h, !!cur_ai->ai_next)) < 0) {
-
             if (ret == AVERROR_EXIT)
                 goto fail1;
             else
                 goto fail;
         }
+        av_application_did_tcp_connect_fd(s->app_ctx, fd);
     }
 
     h->is_streamed = 1;
