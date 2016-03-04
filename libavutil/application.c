@@ -20,6 +20,7 @@
 
 #include "application.h"
 #include "libavformat/network.h"
+#include "libavutil/avstring.h"
 
 int av_application_alloc(AVApplicationContext **ph, void *opaque)
 {
@@ -58,7 +59,7 @@ void av_application_closep(AVApplicationContext **ph)
     *ph = NULL;
 }
 
-void av_application_did_tcp_connect_fd(AVApplicationContext *h, int fd)
+void av_application_did_tcp_connect_fd(AVApplicationContext *h, int error, int fd)
 {
     struct sockaddr_storage so_stg;
     int       ret = 0;
@@ -79,20 +80,88 @@ void av_application_did_tcp_connect_fd(AVApplicationContext *h, int fd)
         case AF_INET: {
             struct sockaddr_in* in4 = (struct sockaddr_in*)&so_stg;
             if (inet_ntop(AF_INET, &(in4->sin_addr), so_ip_name, sizeof(so_ip_name)))
-                av_application_did_tcp_connect_ip_port(h, AF_INET, so_ip_name, in4->sin_port);
+                av_application_did_tcp_connect_ip_port(h, error, AF_INET, so_ip_name, in4->sin_port);
             break;
         }
         case AF_INET6: {
             struct sockaddr_in6* in6 = (struct sockaddr_in6*)&so_stg;
             if (inet_ntop(AF_INET6, &(in6->sin6_addr), so_ip_name, sizeof(so_ip_name)))
-                av_application_did_tcp_connect_ip_port(h, AF_INET6, so_ip_name, in6->sin6_port);
+                av_application_did_tcp_connect_ip_port(h, error, AF_INET6, so_ip_name, in6->sin6_port);
             break;
         }
     }
 }
 
-void av_application_did_tcp_connect_ip_port(AVApplicationContext *h, int family, const char *ip, int port)
+void av_application_did_tcp_connect_ip_port(AVApplicationContext *h, int error, int family, const char *ip, int port)
 {
-    if (h->func_did_tcp_connect_ip_port)
-        h->func_did_tcp_connect_ip_port(h, family, ip, port);
+    if (h && h->func_did_tcp_connect_ip_port)
+        h->func_did_tcp_connect_ip_port(h, error, family, ip, port);
+}
+
+void av_application_on_http_event(AVApplicationContext *h, AVAppHttpEvent *event)
+{
+    if (h && h->func_on_http_event)
+        h->func_on_http_event(h, event);
+}
+
+void av_application_will_http_open(AVApplicationContext *h, void *obj, const char *url)
+{
+    AVAppHttpEvent event = {0};
+
+    if (!h || !obj || !url)
+        return;
+
+    event.event_type = AVAPP_EVENT_WILL_HTTP_OPEN;
+    event.obj        = obj;
+    av_strlcpy(event.url, url, sizeof(event.url));
+
+    av_application_on_http_event(h, &event);
+}
+
+void av_application_did_http_open(AVApplicationContext *h, void *obj, const char *url, int error, int http_code)
+{
+    AVAppHttpEvent event = {0};
+
+    if (!h || !obj || !url)
+        return;
+
+    event.event_type = AVAPP_EVENT_DID_HTTP_OPEN;
+    event.obj        = obj;
+    av_strlcpy(event.url, url, sizeof(event.url));
+    event.error     = error;
+    event.http_code = http_code;
+
+    av_application_on_http_event(h, &event);
+}
+
+void av_application_will_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset)
+{
+    AVAppHttpEvent event = {0};
+
+    if (!h || !obj || !url)
+        return;
+
+    event.event_type = AVAPP_EVENT_WILL_HTTP_SEEK;
+    event.obj        = obj;
+    event.offset     = offset;
+    av_strlcpy(event.url, url, sizeof(event.url));
+
+    av_application_on_http_event(h, &event);
+}
+
+void av_application_did_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset, int error, int http_code)
+{
+    AVAppHttpEvent event = {0};
+
+    if (!h || !obj || !url)
+        return;
+
+    event.event_type = AVAPP_EVENT_DID_HTTP_SEEK;
+    event.obj        = obj;
+    event.offset     = offset;
+    av_strlcpy(event.url, url, sizeof(event.url));
+    event.error     = error;
+    event.http_code = http_code;
+
+    av_application_on_http_event(h, &event);
 }

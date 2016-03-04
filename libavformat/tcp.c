@@ -143,12 +143,14 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     } else {
         if ((ret = ff_listen_connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen,
                                      s->open_timeout / 1000, h, !!cur_ai->ai_next)) < 0) {
+            av_application_did_tcp_connect_fd(s->app_ctx, ret, fd);
             if (ret == AVERROR_EXIT)
                 goto fail1;
             else
                 goto fail;
+        } else {
+            av_application_did_tcp_connect_fd(s->app_ctx, 0, fd);   
         }
-        av_application_did_tcp_connect_fd(s->app_ctx, fd);
     }
 
     h->is_streamed = 1;
