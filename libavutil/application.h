@@ -38,6 +38,15 @@ typedef struct AVAppHttpEvent
     int      http_code;
 } AVAppHttpEvent;
 
+#define AVAPP_EVENT_DID_TCP_READ 1
+
+typedef struct AVAppIOTraffic
+{
+    int     event_type;
+    void   *obj;
+    int     bytes;
+} AVAppIOTraffic;
+
 typedef struct AVApplicationContext AVApplicationContext;
 struct AVApplicationContext {
     const AVClass *av_class;    /**< information for av_log(). Set by av_application_open(). */
@@ -45,6 +54,7 @@ struct AVApplicationContext {
 
     void (*func_did_tcp_connect_ip_port)(AVApplicationContext *h, int error, int family, const char *ip, int port);
     void (*func_on_http_event)(AVApplicationContext *h, AVAppHttpEvent *event);
+    void (*func_on_io_traffic)(AVApplicationContext *h, AVAppIOTraffic *event);
 };
 
 int  av_application_alloc(AVApplicationContext **ph, void *opaque);
@@ -60,5 +70,8 @@ void av_application_will_http_open(AVApplicationContext *h, void *obj, const cha
 void av_application_did_http_open(AVApplicationContext *h, void *obj, const char *url, int error, int http_code);
 void av_application_will_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset);
 void av_application_did_http_seek(AVApplicationContext *h, void *obj, const char *url, int64_t offset, int error, int http_code);
+
+void av_application_on_io_traffic(AVApplicationContext *h, AVAppIOTraffic *event);
+void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int bytes);
 
 #endif /* AVUTIL_APPLICATION_H */

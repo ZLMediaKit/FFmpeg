@@ -165,3 +165,23 @@ void av_application_did_http_seek(AVApplicationContext *h, void *obj, const char
 
     av_application_on_http_event(h, &event);
 }
+
+void av_application_on_io_traffic(AVApplicationContext *h, AVAppIOTraffic *event)
+{
+    if (h && h->func_on_io_traffic)
+        h->func_on_io_traffic(h, event);
+}
+
+void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int bytes)
+{
+    AVAppIOTraffic event = {0};
+
+    if (!h || !obj || bytes <= 0)
+        return;
+
+    event.event_type = AVAPP_EVENT_DID_TCP_READ;
+    event.obj        = obj;
+    event.bytes      = bytes;
+
+    av_application_on_io_traffic(h, &event);
+}
