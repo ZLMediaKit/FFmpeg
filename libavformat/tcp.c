@@ -42,6 +42,7 @@ typedef struct TCPContext {
     int listen_timeout;
     int recv_buffer_size;
     int send_buffer_size;
+    int64_t app_ctx_intptr;
     AVApplicationContext *app_ctx;
 } TCPContext;
 
@@ -54,7 +55,7 @@ static const AVOption options[] = {
     { "listen_timeout",  "Connection awaiting timeout (in milliseconds)",      OFFSET(listen_timeout), AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
     { "send_buffer_size", "Socket send buffer size (in bytes)",                OFFSET(send_buffer_size), AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
     { "recv_buffer_size", "Socket receive buffer size (in bytes)",             OFFSET(recv_buffer_size), AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
-    { "ijkapplication",  "AVApplicationContext",             OFFSET(app_ctx),        AV_OPT_TYPE_INT64, { .i64 = 0 },   INT64_MIN, INT64_MAX, .flags = D },
+    { "ijkapplication",   "AVApplicationContext",                              OFFSET(app_ctx_intptr),   AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, .flags = D },
     { NULL }
 };
 
@@ -77,6 +78,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     char hostname[1024],proto[1024],path[1024];
     char portstr[10];
     s->open_timeout = 5000000;
+    s->app_ctx = (AVApplicationContext *)(intptr_t)s->app_ctx_intptr;
 
     av_url_split(proto, sizeof(proto), NULL, 0, hostname, sizeof(hostname),
         &port, path, sizeof(path), uri);
