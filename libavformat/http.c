@@ -119,6 +119,7 @@ typedef struct HTTPContext {
     HandshakeState handshake_step;
     int is_connected_server;
     char *tcp_hook;
+    int64_t app_ctx_intptr;
     AVApplicationContext *app_ctx;
 } HTTPContext;
 
@@ -159,7 +160,7 @@ static const AVOption options[] = {
     { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
     { "http-tcp-hook", "hook protocol on tcp", OFFSET(tcp_hook), AV_OPT_TYPE_STRING, { .str = "tcp" }, 0, 0, D | E },
-    { "ijkapplication", "AVApplicationContext", OFFSET(app_ctx), AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, .flags = D },
+    { "ijkapplication", "AVApplicationContext", OFFSET(app_ctx_intptr), AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, .flags = D },
     { NULL }
 };
 
@@ -484,6 +485,8 @@ static int http_open(URLContext *h, const char *uri, int flags,
 {
     HTTPContext *s = h->priv_data;
     int ret;
+
+    s->app_ctx = (AVApplicationContext *)(intptr_t)s->app_ctx_intptr;
 
     if( s->seekable == 1 )
         h->is_streamed = 0;
@@ -1596,6 +1599,8 @@ static int http_proxy_open(URLContext *h, const char *uri, int flags)
     HTTPAuthType cur_auth_type;
     char *authstr;
     int new_loc;
+
+    s->app_ctx = (AVApplicationContext *)(intptr_t)s->app_ctx_intptr;
 
     if( s->seekable == 1 )
         h->is_streamed = 0;
