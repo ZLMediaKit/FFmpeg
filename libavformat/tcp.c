@@ -43,6 +43,9 @@ typedef struct TCPContext {
     int recv_buffer_size;
     int send_buffer_size;
     int64_t app_ctx_intptr;
+
+    int ipv6_port_workaround;
+
     AVApplicationContext *app_ctx;
 } TCPContext;
 
@@ -56,6 +59,8 @@ static const AVOption options[] = {
     { "send_buffer_size", "Socket send buffer size (in bytes)",                OFFSET(send_buffer_size), AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
     { "recv_buffer_size", "Socket receive buffer size (in bytes)",             OFFSET(recv_buffer_size), AV_OPT_TYPE_INT, { .i64 = -1 },         -1, INT_MAX, .flags = D|E },
     { "ijkapplication",   "AVApplicationContext",                              OFFSET(app_ctx_intptr),   AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, .flags = D },
+
+    { "ipv6_port_workaround",  "reset port in parsing addrinfo under ipv6",    OFFSET(ipv6_port_workaround), AV_OPT_TYPE_INT, { .i64 = 0 },         0, 1, .flags = D|E },
     { NULL }
 };
 
@@ -67,6 +72,7 @@ static const AVClass tcp_class = {
 };
 
 /* return non zero if error */
+
 static int tcp_open(URLContext *h, const char *uri, int flags)
 {
     struct addrinfo hints = { 0 }, *ai, *cur_ai;
@@ -117,6 +123,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         ret = getaddrinfo(NULL, portstr, &hints, &ai);
     else
         ret = getaddrinfo(hostname, portstr, &hints, &ai);
+
     if (ret) {
         av_log(h, AV_LOG_ERROR,
                "Failed to resolve hostname %s: %s\n",
@@ -124,6 +131,10 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         return AVERROR(EIO);
     }
 
+    if (s->ipv6_port_workaround && ai->ai_family == AF_INET6 && port != 0) {
+        struct sockaddr_in6* in6 = (struct sockaddr_in6*)ai->ai_addr;
+        in6->sin6_port = htons(port);
+    }
     cur_ai = ai;
 
  restart:
