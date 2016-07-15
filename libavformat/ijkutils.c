@@ -22,6 +22,7 @@
  */
 
 #include <stdlib.h>
+#include "url.h"
 #include "ijkavformat.h"
 
 static IjkAVInjectCallback s_av_inject_callback = NULL;
@@ -36,4 +37,32 @@ IjkAVInjectCallback ijkav_register_inject_callback(IjkAVInjectCallback callback)
 IjkAVInjectCallback ijkav_get_inject_callback(void)
 {
     return s_av_inject_callback;
+}
+
+static int ijkmds_open(URLContext *h, const char *arg, int flags, AVDictionary **options)
+{
+    return -1;
+}
+
+static const AVClass ijkmediadatasource_context_class = {
+    .class_name = "IjkMediaDataSource",
+    .item_name  = av_default_item_name,
+    .version    = LIBAVUTIL_VERSION_INT,
+};
+
+URLProtocol ff_ijkmediadatasource_protocol = {
+    .name                = "ijkmediadatasource",
+    .url_open2           = ijkmds_open,
+    .priv_data_size      = 1,
+    .priv_data_class     = &ijkmediadatasource_context_class,
+};
+
+int ijkav_register_ijkmediadatasource_protocol(URLProtocol *protocol, int protocol_size)
+{
+    if (protocol_size != sizeof(URLProtocol)) {
+        av_log(NULL, AV_LOG_ERROR, "ijkav_register_ijkmediadatasource_protocol: ABI mismatch.\n");
+        return -1;
+    }
+    memcpy(&ff_ijkmediadatasource_protocol, protocol, protocol_size);
+    return 0;
 }

@@ -24,7 +24,7 @@
 #ifndef AVFORMAT_IJKAVFORMAT_H
 #define AVFORMAT_IJKAVFORMAT_H
 
-void ijkav_register_all(void);
+#include "url.h"
 
 #define AV_PKT_FLAG_DISCONTINUITY 0x0100
 
@@ -107,5 +107,7 @@ typedef int (*IjkAVInjectCallback)(void *opaque, int message, void *data, size_t
 
 IjkAVInjectCallback ijkav_register_inject_callback(IjkAVInjectCallback callback);
 IjkAVInjectCallback ijkav_get_inject_callback(void);
+
+int ijkav_register_ijkmediadatasource_protocol(URLProtocol *protocol, int protocol_size);
 
 #endif
