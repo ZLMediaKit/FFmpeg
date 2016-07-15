@@ -240,10 +240,11 @@ static int64_t ijkurlhook_seek(URLContext *h, int64_t pos, int whence)
 
 static int ijkhttphook_reconnect_at(URLContext *h, int64_t offset)
 {
+    int           ret        = 0;
     AVDictionary *extra_opts = NULL;
 
     av_dict_set_int(&extra_opts, "offset", offset, 0);
-    int ret = ijkurlhook_reconnect(h, extra_opts);
+    ret = ijkurlhook_reconnect(h, extra_opts);
     av_dict_free(&extra_opts);
     return ret;
 }
