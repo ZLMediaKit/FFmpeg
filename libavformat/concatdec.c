@@ -325,7 +325,7 @@ static int open_file(AVFormatContext *avf, unsigned fileno)
 
     new_avf->interrupt_callback = avf->interrupt_callback;
 
-    if ((ret = ff_copy_whiteblacklists(cat->avf, avf)) < 0)
+    if ((ret = ff_copy_whiteblacklists(new_avf, avf)) < 0)
         return ret;
 
     if (cat->options)
