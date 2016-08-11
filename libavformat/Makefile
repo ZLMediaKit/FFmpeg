@@ -28,6 +28,7 @@ OBJS = allformats.o         \
        url.o                \
        utils.o              \
        avc.o                \
+       ijkutils.o           \
 
 OBJS-$(HAVE_LIBC_MSVCRT)                 += file_open.o
 
