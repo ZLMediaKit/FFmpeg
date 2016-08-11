@@ -29,6 +29,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
+#include "libavutil/application.h"
 
 #include "avformat.h"
 #include "http.h"
@@ -121,6 +122,8 @@ typedef struct HTTPContext {
     HandshakeState handshake_step;
     int is_connected_server;
     char *tcp_hook;
+    int64_t app_ctx_intptr;
+    AVApplicationContext *app_ctx;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -162,6 +165,7 @@ static const AVOption options[] = {
     { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
     { "http-tcp-hook", "hook protocol on tcp", OFFSET(tcp_hook), AV_OPT_TYPE_STRING, { .str = "tcp" }, 0, 0, D | E },
+    { "ijkapplication", "AVApplicationContext", OFFSET(app_ctx_intptr), AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, .flags = D },
     { NULL }
 };
 
@@ -188,6 +192,7 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
     char path1[MAX_URL_SIZE];
     char buf[1024], urlbuf[MAX_URL_SIZE];
     int port, use_proxy, err, location_changed = 0;
+    char prev_location[4096];
     HTTPContext *s = h->priv_data;
 
     lower_proto = s->tcp_hook;
@@ -228,6 +233,7 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
     ff_url_join(buf, sizeof(buf), lower_proto, NULL, hostname, port, NULL);
 
     if (!s->hd) {
+        av_dict_set_int(options, "ijkapplication", (int64_t)(intptr_t)s->app_ctx, 0);
         err = ffurl_open_whitelist(&s->hd, buf, AVIO_FLAG_READ_WRITE,
                                    &h->interrupt_callback, options,
                                    h->protocol_whitelist, h->protocol_blacklist, h);
@@ -235,6 +241,7 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
             return err;
     }
 
+    av_strlcpy(prev_location, s->location, sizeof(prev_location));
     err = http_connect(h, path, local_path, hoststr,
                        auth, proxyauth, &location_changed);
     if (err < 0)
@@ -488,6 +495,8 @@ static int http_open(URLContext *h, const char *uri, int flags,
     HTTPContext *s = h->priv_data;
     int ret;
 
+    s->app_ctx = (AVApplicationContext *)(intptr_t)s->app_ctx_intptr;
+
     if( s->seekable == 1 )
         h->is_streamed = 0;
     else
@@ -517,7 +526,9 @@ static int http_open(URLContext *h, const char *uri, int flags,
     if (s->listen) {
         return http_listen(h, uri, flags, options);
     }
+    av_application_will_http_open(s->app_ctx, (void*)h, uri);
     ret = http_open_cnx(h, options);
+    av_application_did_http_open(s->app_ctx, (void*)h, uri, ret, s->http_code);
     if (ret < 0)
         av_dict_free(&s->chained_options);
     return ret;
@@ -1509,7 +1520,9 @@ static int64_t http_seek_internal(URLContext *h, int64_t off, int whence, int fo
     s->hd = NULL;
 
     /* if it fails, continue on old connection */
+    av_application_will_http_seek(s->app_ctx, (void*)h, s->location, off);
     if ((ret = http_open_cnx(h, &options)) < 0) {
+        av_application_did_http_seek(s->app_ctx, (void*)h, s->location, off, ret, s->http_code);
         av_dict_free(&options);
         memcpy(s->buffer, old_buf, old_buf_size);
         s->buf_ptr = s->buffer;
@@ -1518,6 +1531,7 @@ static int64_t http_seek_internal(URLContext *h, int64_t off, int whence, int fo
         s->off     = old_off;
         return ret;
     }
+    av_application_did_http_seek(s->app_ctx, (void*)h, s->location, off, ret, s->http_code);
     av_dict_free(&options);
     ffurl_close(old_hd);
     return off;
@@ -1601,6 +1615,8 @@ static int http_proxy_open(URLContext *h, const char *uri, int flags)
     HTTPAuthType cur_auth_type;
     char *authstr;
     int new_loc;
+
+    s->app_ctx = (AVApplicationContext *)(intptr_t)s->app_ctx_intptr;
 
     if( s->seekable == 1 )
         h->is_streamed = 0;
