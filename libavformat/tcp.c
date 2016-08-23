@@ -392,13 +392,13 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         return AVERROR(EIO);
     }
 
-    if (s->ipv6_port_workaround && ai->ai_family == AF_INET6 && port != 0) {
-        struct sockaddr_in6* in6 = (struct sockaddr_in6*)ai->ai_addr;
-        in6->sin6_port = htons(port);
-    }
     cur_ai = ai;
 
  restart:
+    if (s->ipv6_port_workaround && cur_ai->ai_family == AF_INET6 && port != 0) {
+        struct sockaddr_in6* in6 = (struct sockaddr_in6*)cur_ai->ai_addr;
+        in6->sin6_port = htons(port);
+    }
     fd = ff_socket(cur_ai->ai_family,
                    cur_ai->ai_socktype,
                    cur_ai->ai_protocol);
