@@ -55,7 +55,7 @@ int64_t av_gettime(void)
 
 int64_t av_gettime_relative(void)
 {
-#if HAVE_CLOCK_GETTIME && defined(CLOCK_MONOTONIC)
+#if HAVE_CLOCK_GETTIME && defined(CLOCK_MONOTONIC) && !defined(__APPLE__)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
