@@ -6286,9 +6286,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         if (ret64 != sample->pos) {
             av_log(mov->fc, AV_LOG_ERROR, "stream %d, offset 0x%"PRIx64": partial file\n",
                    sc->ffindex, sample->pos);
-            if (should_retry(sc->pb, ret64)) {
-                mov_current_sample_dec(sc);
-            }
+            mov_current_sample_dec(sc);
             return AVERROR_INVALIDDATA;
         }
 
@@ -6299,9 +6297,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
 
         ret = av_get_packet(sc->pb, pkt, sample->size);
         if (ret < 0) {
-            if (should_retry(sc->pb, ret)) {
-                mov_current_sample_dec(sc);
-            }
+            mov_current_sample_dec(sc);
             return ret;
         }
         if (sc->has_palette) {
