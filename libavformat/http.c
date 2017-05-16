@@ -1215,7 +1215,7 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
 
             s->chunksize = strtoull(line, NULL, 16);
 
-            av_log(h, AV_LOG_TRACE,
+            av_log(h, AV_LOG_INFO,
                    "Chunked encoding data size: %"PRIu64"'\n",
                     s->chunksize);
 
@@ -1239,8 +1239,12 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
         s->buf_ptr += len;
     } else {
         uint64_t target_end = s->end_off ? s->end_off : s->filesize;
-        if ((!s->willclose || s->chunksize == UINT64_MAX) && s->off >= target_end)
+        if ((!s->willclose || s->chunksize == UINT64_MAX) && s->off >= target_end) {
+            av_log(h, AV_LOG_INFO,
+                   "http_buf_read will return AVERROR_EOF %"PRIu64", %"PRIu64"\n",
+                    s->off, target_end);
             return AVERROR_EOF;
+        }
 
         len = size;
         if (s->filesize > 0 && s->filesize != UINT64_MAX && s->filesize != 2147483647) {
@@ -1250,6 +1254,9 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
         }
         if (len > 0)
             len = ffurl_read(s->hd, buf, len);
+        else
+            av_log(h, AV_LOG_INFO,
+                   "http_buf_read 1len = %d\n", len);
         if (!len && (!s->willclose || s->chunksize == UINT64_MAX) && s->off < target_end) {
             av_log(h, AV_LOG_ERROR,
                    "Stream ends prematurely at %"PRIu64", should be %"PRIu64"\n",
@@ -1264,6 +1271,9 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
             av_assert0(s->chunksize >= len);
             s->chunksize -= len;
         }
+    } else {
+        av_log(h, AV_LOG_INFO,
+                   "http_buf_read 2len = %d, size = %d\n", len, size);
     }
     return len;
 }

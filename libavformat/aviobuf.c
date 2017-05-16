@@ -276,8 +276,10 @@ int64_t avio_seek(AVIOContext *s, int64_t offset, int whence)
               (whence != SEEK_END || force)) {
         while(s->pos < offset && !s->eof_reached)
             fill_buffer(s);
-        if (s->eof_reached)
+        if (s->eof_reached) {
+            av_log(NULL, AV_LOG_INFO, "avio_seek AVERROR_EOF offset1=0x%"PRIx64", buffer_size = %d\n", offset1, buffer_size);
             return AVERROR_EOF;
+        }
         s->buf_ptr = s->buf_end - (s->pos - offset);
     } else if(!s->write_flag && offset1 < 0 && -offset1 < buffer_size>>1 && s->seek && offset > 0) {
         int64_t res;
@@ -513,14 +515,18 @@ static void fill_buffer(AVIOContext *s)
     uint8_t *dst        = s->buf_end - s->buffer + max_buffer_size < s->buffer_size ?
                           s->buf_end : s->buffer;
     int len             = s->buffer_size - (dst - s->buffer);
-
+    if (len == 0) {
+        av_log(s, AV_LOG_WARNING, "fill_buffer len = %d\n", len);
+    }
     /* can't fill the buffer without read_packet, just set EOF if appropriate */
     if (!s->read_packet && s->buf_ptr >= s->buf_end)
         s->eof_reached = 1;
 
     /* no need to do anything if EOF already reached */
-    if (s->eof_reached)
+    if (s->eof_reached) {
+        av_log(s, AV_LOG_WARNING, "fill_buffer first return eof_reached\n");
         return;
+    }
 
     if (s->update_checksum && dst == s->buffer) {
         if (s->buf_end > s->checksum_ptr)
@@ -541,12 +547,15 @@ static void fill_buffer(AVIOContext *s)
         av_assert0(len >= s->orig_buffer_size);
         len = s->orig_buffer_size;
     }
-
+    if (len == 0) {
+        av_log(s, AV_LOG_WARNING, "fill_buffer will read len = %d\n", len);
+    }
     if (s->read_packet)
         len = s->read_packet(s->opaque, dst, len);
     else
         len = 0;
     if (len <= 0) {
+        av_log(s, AV_LOG_WARNING, "fill_buffer ret len = %d\n", len);
         /* do not modify buffer if EOF reached so that a seek back can
            be done without rereading data */
         s->eof_reached = 1;
