@@ -1267,13 +1267,15 @@ static int http_buf_read(URLContext *h, uint8_t *buf, int size)
     }
     if (len > 0) {
         s->off += len;
-        if (s->chunksize > 0) {
+        if (s->chunksize > 0 && s->chunksize != UINT64_MAX) {
             av_assert0(s->chunksize >= len);
             s->chunksize -= len;
         }
     } else {
         av_log(h, AV_LOG_INFO,
                    "http_buf_read 2len = %d, size = %d\n", len, size);
+        av_log(h, AV_LOG_INFO,
+                   "http_buf_read error %"PRIu64", %"PRIu64", %"PRIu64"\n", s->off, s->filesize, s->end_off);
     }
     return len;
 }
