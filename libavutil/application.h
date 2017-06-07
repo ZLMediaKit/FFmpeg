@@ -56,6 +56,12 @@ typedef struct AVAppTcpIOControl {
     char ip[96];
     int  port;
     int  fd;
+    int  flags;
+    int  socktype;
+    int  protocol;
+    int  addr_len;
+    char *hostname;
+    int  hit;
 } AVAppTcpIOControl;
 
 typedef struct AVAppAsyncStatistic {
@@ -110,8 +116,8 @@ void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int byte
 
 int  av_application_on_io_control(AVApplicationContext *h, int event_type, AVAppIOControl *control);
 
-int av_application_on_tcp_will_open(AVApplicationContext *h);
-int av_application_on_tcp_did_open(AVApplicationContext *h, int error, int fd);
+int av_application_on_tcp_will_open(AVApplicationContext *h, AVAppTcpIOControl *control);
+int av_application_on_tcp_did_open(AVApplicationContext *h, int error, int fd, AVAppTcpIOControl *control);
 
 void av_application_on_async_statistic(AVApplicationContext *h, AVAppAsyncStatistic *statistic);
 void av_application_on_async_read_speed(AVApplicationContext *h, AVAppAsyncReadSpeed *speed);

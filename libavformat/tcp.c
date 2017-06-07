@@ -336,6 +336,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     int ret;
     char hostname[1024],proto[1024],path[1024];
     char portstr[10];
+    char hostname_bak[1024];
 
     if (s->open_timeout < 0) {
         s->open_timeout = 15000000;
@@ -379,22 +380,57 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     snprintf(portstr, sizeof(portstr), "%d", port);
     if (s->listen)
         hints.ai_flags |= AI_PASSIVE;
+
+    AVAppTcpIOControl req_control = {0};
+    req_control.hostname = hostname;
+    memcpy(hostname_bak, hostname, 1024);
+    ret = av_application_on_tcp_will_open(s->app_ctx, &req_control);
+    if (ret) {
+        av_log(NULL, AV_LOG_WARNING, "terminated by application in AVAPP_CTRL_WILL_TCP_OPEN");
+        goto fail1;
+    }
+
+    if (!req_control.hit) {
 #ifdef HAVE_PTHREADS
-    ret = ijk_tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback, s->addrinfo_one_by_one);
+        ret = ijk_tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback, s->addrinfo_one_by_one);
 #else
-    if (s->addrinfo_timeout > 0)
-        av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n")
-    if (!hostname[0])
-        ret = getaddrinfo(NULL, portstr, &hints, &ai);
-    else
-        ret = getaddrinfo(hostname, portstr, &hints, &ai);
+        if (s->addrinfo_timeout > 0)
+            av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n")
+        if (!hostname[0])
+            ret = getaddrinfo(NULL, portstr, &hints, &ai);
+        else
+            ret = getaddrinfo(hostname, portstr, &hints, &ai);
 #endif
 
-    if (ret) {
-        av_log(h, AV_LOG_ERROR,
-               "Failed to resolve hostname %s: %s\n",
-               hostname, gai_strerror(ret));
-        return AVERROR(EIO);
+        if (ret) {
+            av_log(h, AV_LOG_ERROR,
+                "Failed to resolve hostname %s: %s\n",
+                hostname, gai_strerror(ret));
+            return AVERROR(EIO);
+        }
+    } else {
+        ai = (struct addrinfo *) av_mallocz(sizeof(struct addrinfo));
+        ai->ai_flags = req_control.flags;
+        ai->ai_family = req_control.family;
+        ai->ai_socktype = req_control.socktype;
+        ai->ai_protocol = req_control.protocol;
+        ai->ai_addrlen = req_control.addr_len;
+        if (ai->ai_family == AF_INET6){
+            struct sockaddr_in6 *sock_in6 = (struct sockaddr_in6 *) av_mallocz(sizeof(struct sockaddr_in6));
+            sock_in6->sin6_family = ai->ai_family;
+            inet_ntop(AF_INET6,(void*)sock_in6->sin6_addr.s6_addr,req_control.ip,sizeof(req_control.ip));
+            sock_in6->sin6_port = req_control.port;
+            ai->ai_addr = (struct sockaddr *)sock_in6;
+        } else {
+            struct sockaddr_in *sock_in = (struct sockaddr_in *) av_mallocz(sizeof(struct sockaddr_in));
+            sock_in->sin_family = AF_INET;
+            inet_pton(AF_INET, req_control.ip, (void*)&sock_in->sin_addr.s_addr);
+            sock_in->sin_port = req_control.port;
+            ai->ai_addr = (struct sockaddr *)sock_in;
+        }
+        ai->ai_canonname = NULL;
+        ai->ai_next = NULL;
+        av_log(NULL, AV_LOG_INFO, "Hit DNS cache req_control.ip = %s, hostname = %s\n", req_control.ip, hostname);
     }
 
     cur_ai = ai;
@@ -439,22 +475,26 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         // Socket descriptor already closed here. Safe to overwrite to client one.
         fd = ret;
     } else {
-        ret = av_application_on_tcp_will_open(s->app_ctx);
-        if (ret) {
-            av_log(NULL, AV_LOG_WARNING, "terminated by application in AVAPP_CTRL_WILL_TCP_OPEN");
-            goto fail1;
-        }
-
         if ((ret = ff_listen_connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen,
                                      s->open_timeout / 1000, h, !!cur_ai->ai_next)) < 0) {
-            if (av_application_on_tcp_did_open(s->app_ctx, ret, fd))
+            AVAppTcpIOControl ret_control = {0};
+            ret_control.hit = req_control.hit;
+            if (av_application_on_tcp_did_open(s->app_ctx, ret, fd, &ret_control))
                 goto fail1;
             if (ret == AVERROR_EXIT)
                 goto fail1;
             else
                 goto fail;
         } else {
-            ret = av_application_on_tcp_did_open(s->app_ctx, 0, fd);
+            AVAppTcpIOControl ret_control = {0};
+            ret_control.hostname = hostname_bak;
+            ret_control.flags    = cur_ai->ai_flags;
+            ret_control.socktype = cur_ai->ai_socktype;
+            ret_control.protocol = cur_ai->ai_protocol;
+            ret_control.socktype = cur_ai->ai_socktype;
+            ret_control.addr_len = cur_ai->ai_addrlen;
+            ret_control.hit      = req_control.hit;
+            ret = av_application_on_tcp_did_open(s->app_ctx, 0, fd, &ret_control);
             if (ret) {
                 av_log(NULL, AV_LOG_WARNING, "terminated by application in AVAPP_CTRL_DID_TCP_OPEN");
                 goto fail1;
