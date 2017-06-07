@@ -395,7 +395,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         ret = ijk_tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback, s->addrinfo_one_by_one);
 #else
         if (s->addrinfo_timeout > 0)
-            av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n")
+            av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n");
         if (!hostname[0])
             ret = getaddrinfo(NULL, portstr, &hints, &ai);
         else
