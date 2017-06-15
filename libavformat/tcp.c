@@ -49,6 +49,9 @@ typedef struct TCPContext {
 
     int addrinfo_one_by_one;
     int addrinfo_timeout;
+    int dns_cache;
+    int64_t dns_cache_timeout;
+    int dns_cache_clear;
 
     AVApplicationContext *app_ctx;
 } TCPContext;
@@ -67,6 +70,9 @@ static const AVOption options[] = {
 
     { "addrinfo_one_by_one",  "parse addrinfo one by one in getaddrinfo()",    OFFSET(addrinfo_one_by_one), AV_OPT_TYPE_INT, { .i64 = 0 },         0, 1, .flags = D|E },
     { "addrinfo_timeout", "set timeout (in microseconds) for getaddrinfo()",   OFFSET(addrinfo_timeout), AV_OPT_TYPE_INT, { .i64 = -1 },       -1, INT_MAX, .flags = D|E },
+    { "dns_cache", "enable dns cache",   OFFSET(dns_cache), AV_OPT_TYPE_INT, { .i64 = 0 },       0, INT_MAX, .flags = D|E },
+    { "dns_cache_timeout", "dns cache TTL (in microseconds)",   OFFSET(dns_cache_timeout), AV_OPT_TYPE_INT, { .i64 = -1 },       -1, INT64_MAX, .flags = D|E },
+    { "dns_cache_clear", "clear dns cache",   OFFSET(dns_cache_clear), AV_OPT_TYPE_INT, { .i64 = 0},       -1, INT_MAX, .flags = D|E },
     { NULL }
 };
 
@@ -76,6 +82,8 @@ static const AVClass tcp_class = {
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
+
+static AVDictionary *dns_dictionary;
 
 int ijk_tcp_getaddrinfo_nonblock(const char *hostname, const char *servname,
                                  const struct addrinfo *hints, struct addrinfo **res,
@@ -100,6 +108,12 @@ typedef struct TCPAddrinfoRequest
     volatile int     finished;
     int              last_error;
 } TCPAddrinfoRequest;
+
+typedef struct DnsCacheInfo
+{
+    int64_t dns_cache_time;
+    struct addrinfo *res;
+} DnsCacheInfo;
 
 static void tcp_getaddrinfo_request_free(TCPAddrinfoRequest *req)
 {
@@ -325,6 +339,68 @@ int ijk_tcp_getaddrinfo_nonblock(const char *hostname, const char *servname,
 }
 #endif
 
+static DnsCacheInfo *get_dns_cache(URLContext *h, char *hostname, struct addrinfo **p_ai) {
+    TCPContext *s = h->priv_data;
+    AVDictionaryEntry *elem;
+    DnsCacheInfo *dns_cache_info;
+    struct addrinfo *ai;
+    int64_t cur_time = av_gettime();
+
+    if (cur_time < 0) {
+        s->dns_cache = 0;
+        return NULL;
+    }
+
+    elem = av_dict_get(dns_dictionary, hostname, NULL, AV_DICT_IGNORE_SUFFIX);
+    if (elem) {
+        dns_cache_info = (DnsCacheInfo *) (intptr_t) strtoll(elem->value, NULL, 10);
+        if (dns_cache_info != NULL) {
+            if (s->dns_cache_clear) {
+                freeaddrinfo(dns_cache_info->res);
+                av_free(dns_cache_info);
+                av_dict_set_int(&dns_dictionary, hostname, 0, 0);
+                return NULL;
+            }
+
+            if (s->dns_cache_timeout < 0 || (dns_cache_info->dns_cache_time + s->dns_cache_timeout * 1000) > cur_time) {
+                ai = (struct addrinfo *) av_mallocz(sizeof(struct addrinfo));
+                memcpy(ai, dns_cache_info->res, sizeof(struct addrinfo));
+                ai->ai_addr = (struct sockaddr *) av_mallocz(sizeof(struct sockaddr));
+                memcpy(ai->ai_addr, dns_cache_info->res->ai_addr, sizeof(struct sockaddr));
+                ai->ai_canonname = NULL;
+                ai->ai_next = NULL;
+                *p_ai = ai;
+                av_log(NULL, AV_LOG_INFO, "Hit DNS cache hostname = %s\n", hostname);
+                return dns_cache_info;
+            } else {
+                freeaddrinfo(dns_cache_info->res);
+                av_free(dns_cache_info);
+                av_dict_set_int(&dns_dictionary, hostname, 0, 0);
+            }
+        }
+    }
+    return NULL;
+}
+
+static void set_dns_cache(char *hostname, struct addrinfo *cur_ai) {
+    DnsCacheInfo *new_dns_cache_info;
+    int64_t cur_time = av_gettime();
+
+    if (cur_time < 0) {
+        return;
+    }
+
+    new_dns_cache_info = (DnsCacheInfo *) av_mallocz(sizeof(struct DnsCacheInfo));
+    new_dns_cache_info->res = (struct addrinfo *) av_mallocz(sizeof(struct addrinfo));
+    memcpy(new_dns_cache_info->res, cur_ai, sizeof(struct addrinfo));
+    new_dns_cache_info->res->ai_addr = (struct sockaddr *) av_mallocz(sizeof(struct sockaddr));
+    memcpy(new_dns_cache_info->res->ai_addr, cur_ai->ai_addr, sizeof(struct sockaddr));
+    new_dns_cache_info->res->ai_canonname = NULL;
+    new_dns_cache_info->res->ai_next = NULL;
+    new_dns_cache_info->dns_cache_time = cur_time;
+    av_dict_set_int(&dns_dictionary, hostname, (int64_t) (intptr_t) new_dns_cache_info, 0);
+}
+
 /* return non zero if error */
 static int tcp_open(URLContext *h, const char *uri, int flags)
 {
@@ -336,6 +412,9 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     int ret;
     char hostname[1024],proto[1024],path[1024];
     char portstr[10];
+    char hostname_bak[1024];
+    AVAppTcpIOControl control = {0};
+    DnsCacheInfo *dns_cache_info = NULL;
 
     if (s->open_timeout < 0) {
         s->open_timeout = 15000000;
@@ -379,22 +458,30 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     snprintf(portstr, sizeof(portstr), "%d", port);
     if (s->listen)
         hints.ai_flags |= AI_PASSIVE;
+
+    if (s->dns_cache) {
+        memcpy(hostname_bak, hostname, 1024);
+        dns_cache_info = get_dns_cache(h, hostname, &ai);
+    }
+
+    if (!dns_cache_info) {
 #ifdef HAVE_PTHREADS
-    ret = ijk_tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback, s->addrinfo_one_by_one);
+        ret = ijk_tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback, s->addrinfo_one_by_one);
 #else
-    if (s->addrinfo_timeout > 0)
-        av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n")
-    if (!hostname[0])
-        ret = getaddrinfo(NULL, portstr, &hints, &ai);
-    else
-        ret = getaddrinfo(hostname, portstr, &hints, &ai);
+        if (s->addrinfo_timeout > 0)
+            av_log(h, AV_LOG_WARNING, "Ignore addrinfo_timeout without pthreads support.\n");
+        if (!hostname[0])
+            ret = getaddrinfo(NULL, portstr, &hints, &ai);
+        else
+            ret = getaddrinfo(hostname, portstr, &hints, &ai);
 #endif
 
-    if (ret) {
-        av_log(h, AV_LOG_ERROR,
-               "Failed to resolve hostname %s: %s\n",
-               hostname, gai_strerror(ret));
-        return AVERROR(EIO);
+        if (ret) {
+            av_log(h, AV_LOG_ERROR,
+                "Failed to resolve hostname %s: %s\n",
+                hostname, gai_strerror(ret));
+            return AVERROR(EIO);
+        }
     }
 
     cur_ai = ai;
@@ -447,17 +534,20 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
 
         if ((ret = ff_listen_connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen,
                                      s->open_timeout / 1000, h, !!cur_ai->ai_next)) < 0) {
-            if (av_application_on_tcp_did_open(s->app_ctx, ret, fd))
+            if (av_application_on_tcp_did_open(s->app_ctx, ret, fd, &control))
                 goto fail1;
             if (ret == AVERROR_EXIT)
                 goto fail1;
             else
                 goto fail;
         } else {
-            ret = av_application_on_tcp_did_open(s->app_ctx, 0, fd);
+            ret = av_application_on_tcp_did_open(s->app_ctx, 0, fd, &control);
             if (ret) {
                 av_log(NULL, AV_LOG_WARNING, "terminated by application in AVAPP_CTRL_DID_TCP_OPEN");
                 goto fail1;
+            } else if (s->dns_cache && !dns_cache_info && strcmp(control.ip, hostname_bak)) {
+                set_dns_cache(hostname_bak, cur_ai);
+                av_log(NULL, AV_LOG_INFO, "Add dns cache hostname = %s, ip = %s\n", hostname_bak , control.ip);
             }
         }
     }
@@ -480,6 +570,12 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
  fail1:
     if (fd >= 0)
         closesocket(fd);
+    if (dns_cache_info && s->dns_cache) {
+        av_log(NULL, AV_LOG_WARNING, "Hit dns cache but connect fail hostname = %s, ip = %s\n", hostname , control.ip);
+        freeaddrinfo(dns_cache_info->res);
+        av_free(dns_cache_info);
+        av_dict_set_int(&dns_dictionary, hostname_bak, 0, 0);
+    }
     freeaddrinfo(ai);
     return ret;
 }
