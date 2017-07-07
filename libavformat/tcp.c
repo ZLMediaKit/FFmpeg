@@ -85,6 +85,7 @@ static const AVClass tcp_class = {
 
 static AVDictionary *dns_dictionary;
 static pthread_mutex_t dns_dictionary_mutex;
+static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static int init_mutex_ret = -1;
 
 int ijk_tcp_getaddrinfo_nonblock(const char *hostname, const char *servname,
@@ -346,14 +347,13 @@ static void free_private_addrinfo(struct addrinfo **p_ai) {
 
     if (ai) {
         if (ai->ai_addr) {
-            av_free(ai->ai_addr);
+            av_freep(&ai->ai_addr);
         }
-        av_free(ai);
+        av_freep(p_ai);
     }
-    ai = NULL;
 }
 
-static DnsCacheInfo *get_dns_cache(URLContext *h, char *hostname, struct addrinfo **p_ai) {
+static int get_dns_cache(URLContext *h, char *hostname, struct addrinfo **p_ai) {
     TCPContext *s = h->priv_data;
     AVDictionaryEntry *elem = NULL;
     DnsCacheInfo *dns_cache_info = NULL;
@@ -361,7 +361,7 @@ static DnsCacheInfo *get_dns_cache(URLContext *h, char *hostname, struct addrinf
     int64_t cur_time = av_gettime();
 
     if (cur_time < 0 || hostname[0] == 0) {
-        return NULL;
+        return 0;
     }
 
     pthread_mutex_lock(&dns_dictionary_mutex);
@@ -372,7 +372,7 @@ static DnsCacheInfo *get_dns_cache(URLContext *h, char *hostname, struct addrinf
             if (s->dns_cache_clear) {
                 av_dict_set_int(&dns_dictionary, hostname, 0, 0);
                 free_private_addrinfo(&dns_cache_info->res);
-                av_free(dns_cache_info);
+                av_freep(&dns_cache_info);
                 goto fail;
             }
 
@@ -385,7 +385,7 @@ static DnsCacheInfo *get_dns_cache(URLContext *h, char *hostname, struct addrinf
                     memcpy(ai, dns_cache_info->res, sizeof(struct addrinfo));
                     ai->ai_addr = (struct sockaddr *) av_mallocz(sizeof(struct sockaddr));
                     if (!ai->ai_addr) {
-                        av_free(ai);
+                        av_freep(&ai);
                         goto fail;
                     }
                     memcpy(ai->ai_addr, dns_cache_info->res->ai_addr, sizeof(struct sockaddr));
@@ -395,21 +395,21 @@ static DnsCacheInfo *get_dns_cache(URLContext *h, char *hostname, struct addrinf
                     av_log(NULL, AV_LOG_INFO, "Hit DNS cache hostname = %s\n", hostname);
                 } else {
                     av_dict_set_int(&dns_dictionary, hostname, 0, 0);
-                    av_free(dns_cache_info);
+                    av_freep(&dns_cache_info);
                     goto fail;
                 }
                 pthread_mutex_unlock(&dns_dictionary_mutex);
-                return dns_cache_info;
+                return 1;
             } else {
                 av_dict_set_int(&dns_dictionary, hostname, 0, 0);
                 free_private_addrinfo(&dns_cache_info->res);
-                av_free(dns_cache_info);
+                av_freep(&dns_cache_info);
             }
         }
     }
 fail:
     pthread_mutex_unlock(&dns_dictionary_mutex);
-    return NULL;
+    return 0;
 }
 
 static void set_dns_cache(char *hostname, struct addrinfo *cur_ai) {
@@ -431,7 +431,7 @@ static void set_dns_cache(char *hostname, struct addrinfo *cur_ai) {
 
     new_dns_cache_info->res = (struct addrinfo *) av_mallocz(sizeof(struct addrinfo));
     if (!new_dns_cache_info->res) {
-        av_free(new_dns_cache_info);
+        av_freep(&new_dns_cache_info);
         return;
     }
 
@@ -439,8 +439,8 @@ static void set_dns_cache(char *hostname, struct addrinfo *cur_ai) {
 
     new_dns_cache_info->res->ai_addr = (struct sockaddr *) av_mallocz(sizeof(struct sockaddr));
     if (!new_dns_cache_info->res->ai_addr) {
-        av_free(new_dns_cache_info->res);
-        av_free(new_dns_cache_info);
+        av_freep(&new_dns_cache_info->res);
+        av_freep(&new_dns_cache_info);
         return;
     }
 
@@ -451,6 +451,10 @@ static void set_dns_cache(char *hostname, struct addrinfo *cur_ai) {
     pthread_mutex_lock(&dns_dictionary_mutex);
     av_dict_set_int(&dns_dictionary, hostname, (int64_t) (intptr_t) new_dns_cache_info, 0);
     pthread_mutex_unlock(&dns_dictionary_mutex);
+}
+
+static void private_mutex_init(void){
+    init_mutex_ret = pthread_mutex_init(&dns_dictionary_mutex, NULL);
 }
 
 /* return non zero if error */
@@ -466,11 +470,12 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     char portstr[10];
     char hostname_bak[1024];
     AVAppTcpIOControl control = {0};
+    int hit_dns_cache = 0;
+    AVDictionaryEntry *elem = NULL;
     DnsCacheInfo *dns_cache_info = NULL;
-
-    if (init_mutex_ret != 0 && s->dns_cache) {
-        init_mutex_ret = pthread_mutex_init(&dns_dictionary_mutex, NULL);
-        if (init_mutex_ret != 0) {
+    if (s->dns_cache && init_mutex_ret) {
+        pthread_once(&key_once, private_mutex_init);
+        if (init_mutex_ret) {
             s->dns_cache = 0;
         }
     }
@@ -520,10 +525,10 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
 
     if (s->dns_cache) {
         memcpy(hostname_bak, hostname, 1024);
-        dns_cache_info = get_dns_cache(h, hostname, &ai);
+        hit_dns_cache = get_dns_cache(h, hostname, &ai);
     }
 
-    if (!dns_cache_info) {
+    if (!hit_dns_cache) {
 #ifdef HAVE_PTHREADS
         ret = ijk_tcp_getaddrinfo_nonblock(hostname, portstr, &hints, &ai, s->addrinfo_timeout, &h->interrupt_callback, s->addrinfo_one_by_one);
 #else
@@ -604,7 +609,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
             if (ret) {
                 av_log(NULL, AV_LOG_WARNING, "terminated by application in AVAPP_CTRL_DID_TCP_OPEN");
                 goto fail1;
-            } else if (s->dns_cache && !dns_cache_info && strcmp(control.ip, hostname_bak) && hostname_bak[0] != 0) {
+            } else if (s->dns_cache && !hit_dns_cache && strcmp(control.ip, hostname_bak) && hostname_bak[0] != 0) {
                 set_dns_cache(hostname_bak, cur_ai);
                 av_log(NULL, AV_LOG_INFO, "Add dns cache hostname = %s, ip = %s\n", hostname_bak , control.ip);
             }
@@ -614,7 +619,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     h->is_streamed = 1;
     s->fd = fd;
 
-    if (!s->dns_cache || !dns_cache_info) {
+    if (!s->dns_cache || !hit_dns_cache) {
         freeaddrinfo(ai);
     } else {
         free_private_addrinfo(&ai);
@@ -633,12 +638,18 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
  fail1:
     if (fd >= 0)
         closesocket(fd);
-    if (s->dns_cache && dns_cache_info) {
+    if (s->dns_cache && hit_dns_cache) {
         av_log(NULL, AV_LOG_ERROR, "Hit dns cache but connect fail hostname = %s, ip = %s\n", hostname , control.ip);
         pthread_mutex_lock(&dns_dictionary_mutex);
-        av_dict_set_int(&dns_dictionary, hostname_bak, 0, 0);
-        free_private_addrinfo(&dns_cache_info->res);
-        av_free(dns_cache_info);
+        elem = av_dict_get(dns_dictionary, hostname_bak, NULL, AV_DICT_MATCH_CASE);
+        if (elem) {
+            dns_cache_info = (DnsCacheInfo *) (intptr_t) strtoll(elem->value, NULL, 10);
+            if (dns_cache_info != NULL) {
+                av_dict_set_int(&dns_dictionary, hostname_bak, 0, 0);
+                free_private_addrinfo(&dns_cache_info->res);
+                av_freep(&dns_cache_info);
+            }
+        }
         pthread_mutex_unlock(&dns_dictionary_mutex);
         free_private_addrinfo(&ai);
     } else {
