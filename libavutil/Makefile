@@ -25,6 +25,7 @@ HEADERS = adler32.h                                                     \
           dict.h                                                        \
           display.h                                                     \
           downmix_info.h                                                \
+          dns_cache.h                                                   \
           error.h                                                       \
           eval.h                                                        \
           fifo.h                                                        \
@@ -111,6 +112,7 @@ OBJS = adler32.o                                                        \
        dict.o                                                           \
        display.o                                                        \
        downmix_info.o                                                   \
+       dns_cache.o                                                      \
        error.o                                                          \
        eval.o                                                           \
        fifo.o                                                           \
