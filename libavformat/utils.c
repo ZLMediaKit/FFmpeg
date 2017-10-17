@@ -54,6 +54,7 @@
 
 #include "libavutil/ffversion.h"
 const char av_format_ffversion[] = "FFmpeg version " FFMPEG_VERSION;
+static int g_video_stream_index = 0;
 
 /**
  * @file
@@ -522,6 +523,12 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
         av_log(NULL, AV_LOG_ERROR, "Input context has not been properly allocated by avformat_alloc_context() and is not NULL either\n");
         return AVERROR(EINVAL);
     }
+
+    s->total_gops = 0;
+    s->parsed_gops = 0;
+    s->last_video_dts = 0;
+    s->parsing_completed = 0;
+
     if (fmt)
         s->iformat = fmt;
 
@@ -636,8 +643,12 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
 
     update_stream_avctx(s);
 
-    for (i = 0; i < s->nb_streams; i++)
+    for (i = 0; i < s->nb_streams; i++) {
+        if (s->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            g_video_stream_index = i;
+        }
         s->streams[i]->internal->orig_codec_id = s->streams[i]->codecpar->codec_id;
+    }
 
     if (options) {
         av_dict_free(options);
@@ -1717,7 +1728,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return ret;
 }
 
-int av_read_frame(AVFormatContext *s, AVPacket *pkt)
+int av_read_frame_internal(AVFormatContext *s, AVPacket *pkt)
 {
     const int genpts = s->flags & AVFMT_FLAG_GENPTS;
     int eof = 0;
@@ -1810,6 +1821,31 @@ return_packet:
         pkt->pts -= RELATIVE_TS_BASE;
 
     return ret;
+}
+
+int av_read_frame(AVFormatContext *s, AVPacket *pkt)
+{
+    int err = 0;
+    int last_video_dts = s->last_video_dts;
+
+    err = av_read_frame_internal(s, pkt);
+    if (err < 0 || !s->quick_parse_mp4) {
+        return err;
+    }
+
+    av_log(s, AV_LOG_TRACE, "GOP cnt: %d, stream idx: %d, pts: %lld, dts: %lld, duration: %lld, size: %d, pos:%lld\n", 
+                            s->parsed_gops, pkt->stream_index, pkt->pts, pkt->dts, pkt->duration, pkt->size, pkt->pos);
+
+    if (s->quick_parse_mp4 && pkt->stream_index == g_video_stream_index && pkt->dts >= last_video_dts) {
+        if (s->iformat->quick_get_gop_info) {
+            err = s->iformat->quick_get_gop_info(s);
+            if (err < 0) {
+                return err;
+            }
+        }
+    }
+
+    return 0;
 }
 
 /* XXX: suppress the packet queue */

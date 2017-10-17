@@ -724,6 +724,7 @@ typedef struct AVInputFormat {
      */
     int (*read_header2)(struct AVFormatContext *, AVDictionary **options);
 
+    int (*quick_get_gop_info)(struct AVFormatContext *);
     /**
      * Read one packet and put it in 'pkt'. pts and flags are also
      * set. 'avformat_new_stream' can be called only if the flag
@@ -1922,6 +1923,32 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    /*
+    * Identifier for quick-parsing mp4 header.
+    */
+    unsigned int quick_parse_mp4;
+
+    /*
+    * Total gop counts in video stream.
+    */    
+    int total_gops;
+
+    /*
+    *  Gop counts parsed in video stream by quick-parsing process.
+    */
+    int parsed_gops;
+
+    /*
+    *  Dts of last video sample currently parsed
+    */
+    int last_video_dts;
+
+    /*
+    * Identifier representing if all gops have been parsed.
+    */    
+    int parsing_completed;
+    
 } AVFormatContext;
 
 /**
@@ -2327,6 +2354,9 @@ int av_find_best_stream(AVFormatContext *ic,
  *
  * @return 0 if OK, < 0 on error or end of file
  */
+int av_read_frame_internal(AVFormatContext *s, AVPacket *pkt);
+
+// * Return the next frame of a stream in a gop.
 int av_read_frame(AVFormatContext *s, AVPacket *pkt);
 
 /**

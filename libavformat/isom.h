@@ -211,6 +211,61 @@ typedef struct MOVStreamContext {
     } cenc;
 } MOVStreamContext;
 
+
+// ---------- Jerry.Yin ----------
+typedef struct MOVBoxContext {
+    uint8_t *box_buffer;
+    int box_size;
+    AVIOContext *pb;
+} MOVBoxContext;
+
+typedef struct CTTSQuickContext {
+    unsigned int total_ctts_entry_count;
+    int has_finished_ctts;
+    unsigned int previous_sample_count;
+} CTTSQuickContext;
+
+typedef struct STSCQuickContext {
+    unsigned int total_stsc_entry_count;
+    unsigned int stsc_chunk_index;
+    unsigned int parsed_stsc_index;
+    int has_finished_stsc;
+    unsigned int previous_sample_count;
+} STSCQuickContext;
+
+typedef struct STSZQuickContext {
+    unsigned int total_stsz_sample_count;
+    unsigned int stsz_sample_index;
+    unsigned int parsed_stsz_index;
+    int has_finished_stsz;
+    unsigned int previous_sample_count;
+} STSZQuickContext;
+
+typedef struct STCOQuickContext {
+    unsigned int total_stco_entry_count;
+    unsigned int stco_chunk_index;
+    unsigned int parsed_stco_chunk_index;
+    int has_finished_stco;
+} STCOQuickContext;
+
+typedef struct StblContext {
+    MOVBoxContext ctts_box_ctx;
+    MOVBoxContext stsc_box_ctx;
+    MOVBoxContext stsz_box_ctx;
+    MOVBoxContext stco_box_ctx;
+
+    CTTSQuickContext ctts_quick_ctx;
+    STSCQuickContext stsc_quick_ctx;
+    STSZQuickContext stsz_quick_ctx;
+    STCOQuickContext stco_quick_ctx;
+
+    unsigned int parsed_ts_index;
+    int64_t current_dts;
+    unsigned int key_distance;
+    unsigned int stts_index;
+} StblContext;
+// ---------- Jerry.Yin ----------
+
 typedef struct MOVContext {
     const AVClass *class; ///< class for private options
     AVFormatContext *fc;
@@ -261,6 +316,15 @@ typedef struct MOVContext {
     int decryption_key_len;
     int enable_drefs;
     int32_t movie_display_matrix[3][3]; ///< display matrix from mvhd
+// ---------- Jerry.Yin ----------
+    int quick_read;
+    StblContext *stbl_ctx;
+    int keyframes_parsed;
+    int total_frames_parsed;
+
+    int entry_index_fixed;
+    int64_t edit_timeline_offset;
+// ---------- Jerry.Yin ----------   
 } MOVContext;
 
 int ff_mp4_read_descr_len(AVIOContext *pb);

@@ -65,6 +65,9 @@
 
 #include "qtpalette.h"
 
+/* Global variables & Func declarations*/
+static int g_video_stream_index = 0;
+
 /* those functions parse an atom */
 /* links atom IDs to parse functions */
 typedef struct MOVParseTableEntry {
@@ -2524,6 +2527,7 @@ static int mov_read_stss(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     for (i = 0; i < entries && !pb->eof_reached; i++) {
         sc->keyframes[i] = avio_rb32(pb);
+        av_log(c->fc, AV_LOG_TRACE, "keyframes[]=%d\n", sc->keyframes[i]);
     }
 
     sc->keyframe_count = i;
@@ -2705,6 +2709,7 @@ static int mov_read_ctts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     AVStream *st;
     MOVStreamContext *sc;
     unsigned int i, entries, ctts_count = 0;
+    int64_t total_sample_count=0;
 
     if (c->fc->nb_streams < 1)
         return 0;
@@ -2740,9 +2745,9 @@ static int mov_read_ctts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         sc->ctts_data[ctts_count].count    = count;
         sc->ctts_data[ctts_count].duration = duration;
         ctts_count++;
+        total_sample_count += count;
 
-        av_log(c->fc, AV_LOG_TRACE, "count=%d, duration=%d\n",
-                count, duration);
+        av_log(c->fc, AV_LOG_TRACE, "ctts index: %d, count=%d, duration=%d\n", ctts_count, count, duration);
 
         if (FFNABS(duration) < -(1<<28) && i+2<entries) {
             av_log(c->fc, AV_LOG_WARNING, "CTTS invalid\n");
@@ -3300,6 +3305,266 @@ static void mov_fix_index(MOVContext *mov, AVStream *st)
     current_index_range->start = 0;
     current_index_range->end = 0;
     msc->current_index = msc->index_ranges[0].start;
+}
+
+static int gop_fix_index(MOVContext *mov, AVStream *st)
+{
+    MOVStreamContext *msc = st->priv_data;
+    AVIndexEntry *e_old = st->index_entries;
+
+    int nb_old = st->nb_index_entries;
+//    const AVIndexEntry *e_old_end = e_old + nb_old;
+    AVIndexEntry *current = NULL;
+    MOVStts *ctts_data_old = msc->ctts_data;
+    int64_t ctts_count_old = msc->ctts_count;
+
+    int64_t edit_list_dts_counter = 0;
+//    int64_t frame_duration = 0;
+//    int flags = 0;
+
+    int64_t edit_list_index = 0;
+    int64_t edit_list_media_time = 0;
+    int64_t edit_list_duration = 0;
+//    int64_t edit_list_start_encountered = 0;
+    int64_t edit_list_dts_entry_end = 0;
+    int64_t start_dts = 0;
+//    int64_t curr_cts = 0;
+
+    int64_t timeline_offset = 0;
+
+    int entry_start_index = mov->entry_index_fixed;
+    int entry_end_index = msc->sample_count;
+
+    if (!msc->elst_data || msc->elst_count <= 0 || nb_old <= 0) {
+        return -1;
+    }
+
+    if (mov->entry_index_fixed == 0) {
+
+        // Offset the DTS by ctts[0] to make the PTS of the first frame 0
+        if (ctts_data_old && ctts_count_old > 0) {
+            edit_list_dts_entry_end -= ctts_data_old[0].duration;
+            av_log(mov->fc, AV_LOG_DEBUG, "Offset DTS by ctts[%d].duration: %d\n", 0, ctts_data_old[0].duration);
+        }
+        
+        if (msc->dts_shift > 0)
+            edit_list_dts_entry_end -= msc->dts_shift;
+
+        // Get edit timeline offset
+        while (get_edit_list_entry(mov, msc, edit_list_index, &edit_list_media_time,
+                            &edit_list_duration, mov->time_scale)) {
+            av_log(mov->fc, AV_LOG_DEBUG, "Processing st: %d, edit list %"PRId64" - media time: %"PRId64", duration: %"PRId64"\n",
+                st->index, edit_list_index, edit_list_media_time, edit_list_duration);
+            edit_list_index++;
+            edit_list_dts_counter = edit_list_dts_entry_end;
+            edit_list_dts_entry_end += edit_list_duration;
+            if (edit_list_media_time == -1) {
+                continue;
+            }
+        }
+
+        current = e_old;
+        timeline_offset = edit_list_dts_counter - current->timestamp;
+
+    } else {
+        timeline_offset =  mov->edit_timeline_offset;
+        current = e_old + entry_start_index;
+    }
+
+    for (int i = entry_start_index; i < entry_end_index; i++) {
+        current->timestamp += timeline_offset;
+        current++;
+    }
+
+/*    for (int i = 0; i < st->nb_index_entries; i++) {
+        AVIndexEntry *e = &st->index_entries[i];
+        av_log(mov->fc, AV_LOG_TRACE, "FIX AVIndexEntries:  stream_idx: %d, sample: %d, offset: %"PRIx64", dts: %"PRId64", "
+        "size: %d, distance: %d, keyframe: %d\n", st->index, i, e->pos, e->timestamp, 
+                e->size, e->min_distance, e->flags);
+    }*/
+
+    // Update av stream length
+    st->duration = edit_list_dts_entry_end - start_dts;
+
+    mov->entry_index_fixed += nb_old;
+    mov->edit_timeline_offset = timeline_offset;
+
+    return 0;
+}
+
+static int gop_build_index(MOVContext *mov, AVStream *st, int gop_frame_count)
+{
+    MOVStreamContext *sc = st->priv_data;
+    int64_t current_offset = 0;
+    int64_t current_dts = mov->stbl_ctx->current_dts;
+
+    unsigned int max_chunk_count = sc->chunk_count;
+    unsigned int max_sample_count = sc->sample_count;
+    unsigned int max_ts_count = sc->stts_count;
+    unsigned int max_stsc_count = sc->stsc_count;
+    unsigned int max_key_frame_count = sc->keyframe_count;
+
+    unsigned int this_chunk_index = mov->stbl_ctx->stco_quick_ctx.parsed_stco_chunk_index;
+    unsigned int this_sample_index = mov->stbl_ctx->stsz_quick_ctx.parsed_stsz_index;
+    unsigned int this_stsc_index = mov->stbl_ctx->stsc_quick_ctx.parsed_stsc_index;
+    unsigned int this_ts_index = mov->stbl_ctx->parsed_ts_index;
+    unsigned int this_stss_index = mov->stbl_ctx->stts_index;;
+
+    if (this_sample_index > gop_frame_count) {
+        return 0;
+    }
+
+//    unsigned int stts_index = 0;
+//    unsigned int stsc_index = 0;
+
+    uint64_t stream_size = 0;    
+
+    if (sc->elst_count) {
+        int i, edit_start_index = 0;
+        int64_t empty_duration = 0; // empty duration of the first edit list entry
+        int64_t start_time = 0; // start time of the media
+
+        for (i = 0; i < sc->elst_count; i++) {
+            const MOVElst *e = &sc->elst_data[i];
+            if (i == 0 && e->time == -1) {
+                /* if empty, the first entry is the start time of the stream
+                    * relative to the presentation itself */
+                empty_duration = e->duration;
+                edit_start_index = 1;
+            } else if (i == edit_start_index && e->time >= 0) {
+                start_time = e->time;
+            }
+        }
+
+        /* adjust first dts according to edit list */
+        if ((empty_duration || start_time) && mov->time_scale > 0) {
+            if (empty_duration)
+                empty_duration = av_rescale(empty_duration, sc->time_scale, mov->time_scale);
+            sc->time_offset = start_time - empty_duration;
+        }
+    }
+
+//    unsigned int current_sample = 0;
+    unsigned int stts_sample = 0;
+    unsigned int sample_size = 0;
+    unsigned int distance = mov->stbl_ctx->key_distance;
+    int64_t last_dts = 0;
+    int64_t dts_correction = 0;
+    unsigned int i = 0, j = 0;
+
+    int key_off = (max_key_frame_count && sc->keyframes[0] > 0) || (sc->stps_count && sc->stps_data[0] > 0);
+
+    current_dts -= sc->dts_shift;
+    last_dts     = current_dts;
+
+    if (!max_sample_count || max_sample_count >= UINT_MAX / sizeof(*st->index_entries) - st->nb_index_entries)
+        return -1;
+    if (av_reallocp_array(&st->index_entries,
+                            st->nb_index_entries + max_sample_count,
+                            sizeof(*st->index_entries)) < 0) {
+        st->nb_index_entries = 0;
+        return -1;
+    }
+    st->index_entries_allocated_size = (st->nb_index_entries + max_sample_count) * sizeof(*st->index_entries);
+
+    for (i = this_chunk_index; i < max_chunk_count; i++) {
+//        int64_t next_offset = i+1 < max_chunk_count ? sc->chunk_offsets[i+1] : INT64_MAX;
+        current_offset = sc->chunk_offsets[i];
+
+        while (this_stsc_index + 1 < max_stsc_count &&
+                i + 1 == sc->stsc_data[this_stsc_index + 1].first) {
+            this_stsc_index++;
+        }
+        
+/*            if (next_offset > current_offset && sc->sample_size>0 && sc->sample_size < sc->stsz_sample_size &&
+                sc->stsc_data[stsc_index].count * (int64_t)sc->stsz_sample_size > next_offset - current_offset) {
+                av_log(mov->fc, AV_LOG_WARNING, "STSZ sample size %d invalid (too large), ignoring\n", sc->stsz_sample_size);
+                sc->stsz_sample_size = sc->sample_size;
+        }
+
+        if (sc->stsz_sample_size>0 && sc->stsz_sample_size < sc->sample_size) {
+            av_log(mov->fc, AV_LOG_WARNING, "STSZ sample size %d invalid (too small), ignoring\n", sc->stsz_sample_size);
+            sc->stsz_sample_size = sc->sample_size;
+        }*/
+        
+        av_log(mov->fc, AV_LOG_TRACE, "stsc data: %u,  count: %u\n", this_stsc_index, sc->stsc_data[this_stsc_index].count);
+        this_chunk_index++;
+        for(j = 0; j < sc->stsc_data[this_stsc_index].count; j++) {
+            int keyframe = 0;
+            if (this_sample_index >= max_sample_count) {
+                this_chunk_index--;
+                av_log(mov->fc, AV_LOG_TRACE, "All samples avaiable have been parsed.\n");
+                goto end;
+            }
+
+            if (!sc->keyframe_absent && (!sc->keyframe_count || this_sample_index + key_off == sc->keyframes[this_stss_index])) {
+                keyframe = 1;
+                if (this_stss_index + 1 < sc->keyframe_count)
+                    this_stss_index++;
+            }
+
+            if (keyframe)
+                distance = 0;
+
+            sample_size = sc->stsz_sample_size > 0 ? sc->stsz_sample_size : sc->sample_sizes[this_sample_index];
+            if (sc->pseudo_stream_id == -1 ||
+                sc->stsc_data[this_stsc_index].id - 1 == sc->pseudo_stream_id) {
+                AVIndexEntry *e = NULL;
+                if (sample_size > 0x3FFFFFFF) {
+                    av_log(mov->fc, AV_LOG_ERROR, "Sample size %u is too large\n", sample_size);
+                    return -1;
+                }
+                e = &st->index_entries[st->nb_index_entries++];
+                e->pos = current_offset;
+                e->timestamp = current_dts;
+                e->size = sample_size;
+                e->min_distance = distance;
+                e->flags = keyframe ? AVINDEX_KEYFRAME : 0;
+                av_log(mov->fc, AV_LOG_TRACE, "AVIndex stream %d, sample %d, offset %"PRIx64", dts %"PRId64", "
+                        "size %d, distance %d, keyframe %d\n", st->index, this_sample_index,
+                        current_offset, current_dts, sample_size, distance, keyframe);
+                if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO  && st->info && st->nb_index_entries < 100)
+                    ff_rfps_add_frame(mov->fc, st, current_dts);
+            }
+
+            current_offset += sample_size;
+            stream_size += sample_size;
+
+            current_dts += sc->stts_data[this_ts_index].duration;
+            if (!dts_correction || current_dts + dts_correction > last_dts) {
+                current_dts += dts_correction;
+                dts_correction = 0;
+            } else {
+                /* Avoid creating non-monotonous DTS */
+                dts_correction += current_dts - last_dts - 1;
+                current_dts = last_dts + 1;
+            }
+            last_dts = current_dts;
+            distance++;
+            stts_sample++;
+            this_sample_index++; 
+            if (this_ts_index + 1 < max_ts_count && stts_sample == sc->stts_data[this_ts_index].count) {
+                stts_sample = 0;
+                this_ts_index++;
+            }
+        }
+
+    }
+    if (st->duration > 0)
+        st->codecpar->bit_rate = stream_size*8*sc->time_scale/st->duration;
+
+end:
+    gop_fix_index(mov, st);   
+
+    mov->stbl_ctx->stco_quick_ctx.parsed_stco_chunk_index = this_chunk_index;
+    mov->stbl_ctx->stsc_quick_ctx.parsed_stsc_index = this_stsc_index;
+    mov->stbl_ctx->stsz_quick_ctx.parsed_stsz_index = this_sample_index;
+    mov->stbl_ctx->parsed_ts_index = this_ts_index;
+    mov->stbl_ctx->stts_index = this_stss_index;
+    mov->stbl_ctx->current_dts = current_dts;
+    mov->stbl_ctx->key_distance = distance;
+
+    return 0;
 }
 
 static void mov_build_index(MOVContext *mov, AVStream *st)
@@ -5264,6 +5529,744 @@ static int cenc_filter(MOVContext *c, MOVStreamContext *sc, int64_t index, uint8
     return 0;
 }
 
+typedef struct buffer_data {
+    uint8_t *ptr;
+    size_t size;
+} BufferData;
+
+BufferData g_ctts_bd = {0};
+BufferData g_stsc_bd = {0};
+BufferData g_stsz_bd = {0};
+BufferData g_stco_bd = {0};
+
+
+static int read_packet(void *opaque, uint8_t *buf, int buf_size)
+{
+    struct buffer_data *bd = (struct buffer_data *)opaque;
+    buf_size = FFMIN(buf_size, bd->size);
+
+//    printf("ptr:%p size:%zu\n", bd->ptr, bd->size);
+
+    /* copy internal buffer data to buf */
+    memcpy(buf, bd->ptr, buf_size);
+    bd->ptr  += buf_size;
+    bd->size -= buf_size;
+
+    return buf_size;
+}
+
+static int create_box_avio_context(MOVBoxContext *box_ctx, MOVContext *c, BufferData *bd)
+{
+    // Get box avio_ctx
+    int err = 0;
+    AVIOContext *pb = NULL;
+    uint8_t *avio_ctx_buffer = NULL;
+    size_t avio_ctx_buffer_size = 64;
+    bd->ptr = box_ctx->box_buffer;
+    bd->size =  box_ctx->box_size;
+
+    avio_ctx_buffer = (uint8_t *)av_mallocz(avio_ctx_buffer_size);
+    if (!avio_ctx_buffer) {
+        av_log(c->fc, AV_LOG_ERROR, "avio_ctx_buffer allocation failed in create_box_avio_context\n");
+        err = AVERROR(ENOMEM);
+        goto failed;
+    }
+    pb = avio_alloc_context(avio_ctx_buffer, avio_ctx_buffer_size, 0, bd, read_packet, NULL, NULL);
+    if (!pb) {
+        av_log(c->fc, AV_LOG_ERROR, "AVIOContext allocation failed in create_box_avio_context\n");
+        err = AVERROR(ENOMEM);
+        goto failed;
+    }
+    box_ctx->pb = pb;
+
+    return 0;
+
+failed:
+    if (pb) {
+        av_freep(&pb->buffer);
+        av_freep(&pb);
+    }
+    return -1;
+}
+
+static int mov_quick_read_ctts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    unsigned int entries;
+    StblContext *stbl_ctx = c->stbl_ctx;
+    MOVBoxContext box_ctx = {0};
+    AVIOContext *box_pb = NULL;
+    
+    // Copy ctts box data...
+    uint32_t atom_size = atom.size;
+    box_ctx.box_size = atom_size - 8;
+    box_ctx.box_buffer = av_mallocz(box_ctx.box_size);
+    if (NULL == box_ctx.box_buffer) {
+        av_log(c->fc, AV_LOG_ERROR, "Memory allocation failed in quick_read_ctts\n");
+        return AVERROR(ENOMEM);
+    }
+ 
+    if (avio_read(pb, box_ctx.box_buffer, box_ctx.box_size) < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Reading data failed in quick_read_ctts\n");
+        return -1;
+    }
+
+    // get box-private AVIOContext
+    if(create_box_avio_context(&box_ctx, c, &g_ctts_bd) < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Creating box avio_ctx failed in quick_read_ctts\n");
+        return -1;
+    }
+    
+    box_pb = box_ctx.pb;
+    // get ctts box header
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams-1];
+    sc = st->priv_data;
+    
+    avio_r8(box_pb); /* version */
+    avio_rb24(box_pb); /* flags */
+    entries = avio_rb32(box_pb);
+    if (!entries)
+        return 0;
+    if (entries >= UINT_MAX / sizeof(*sc->ctts_data))
+        return AVERROR_INVALIDDATA;
+
+    c->stbl_ctx->ctts_quick_ctx.total_ctts_entry_count = entries;
+    c->stbl_ctx->ctts_quick_ctx.has_finished_ctts = 0;
+    av_log(c->fc, AV_LOG_TRACE, "track[%u].ctts.entries = %u\n", c->fc->nb_streams - 1, entries);
+
+    av_freep(&sc->ctts_data);
+    sc->ctts_data = av_realloc(NULL, entries * sizeof(*sc->ctts_data));
+    if (!sc->ctts_data)
+        return AVERROR(ENOMEM);
+
+    stbl_ctx->ctts_box_ctx = box_ctx;
+    av_log(c->fc, AV_LOG_TRACE, "quick_read_ctts finished\n");
+    return 0;
+}
+
+static int mov_quick_read_stsz(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    StblContext *stbl_ctx = c->stbl_ctx;
+    MOVBoxContext box_ctx = {0};
+    AVIOContext *box_pb = NULL;
+    unsigned int sample_count, sample_size, field_size;
+    
+    // Copy stsz box data...
+    uint32_t atom_size = atom.size;
+    box_ctx.box_size = atom_size - 8;
+    box_ctx.box_buffer = av_mallocz(box_ctx.box_size);
+    if (NULL == box_ctx.box_buffer) {
+        av_log(c->fc, AV_LOG_ERROR, "Memory allocation failed in quick_read_stsz\n");
+        return AVERROR(ENOMEM);
+    }
+ 
+    if (avio_read(pb, box_ctx.box_buffer, box_ctx.box_size) < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Reading data failed in quick_read_stts\n");
+        return -1;
+    }
+
+    // get box-private AVIOContext
+    if(create_box_avio_context(&box_ctx, c, &g_stsz_bd) < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Creating box avio_ctx failed in quick_read_stsz\n");
+        return -1;
+    }
+    box_pb = box_ctx.pb;
+
+    avio_r8(box_pb); // version 
+    avio_rb24(box_pb); // flags 
+
+    // get stsz box header
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams-1];
+    sc = st->priv_data;
+
+    sample_size = avio_rb32(box_pb);
+    if (!sc->sample_size) /* do not overwrite value computed in stsd */
+        sc->sample_size = sample_size;
+    sc->stsz_sample_size = sample_size;
+    field_size = 32;
+
+    sample_count = avio_rb32(box_pb);
+    av_log(c->fc, AV_LOG_TRACE, "const sample size = %d, sample_count = %d\n", sc->sample_size, sample_count); 
+    c->stbl_ctx->stsz_quick_ctx.total_stsz_sample_count = sample_count;
+    if (sample_size) {
+        return 0;
+    }
+
+    if ((sample_count >= (UINT_MAX - 4) / field_size) || sample_count == 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Invalid sample count %d\n", sample_count);
+        return AVERROR_INVALIDDATA;
+    }
+
+    if (sc->sample_sizes)
+        av_log(c->fc, AV_LOG_WARNING, "Duplicated STSZ atom\n");
+    av_free(sc->sample_sizes);
+    sc->sample_count = 0;
+    sc->sample_sizes = av_malloc_array(sample_count, sizeof(*sc->sample_sizes));
+    if (!sc->sample_sizes) {
+        av_log(c->fc, AV_LOG_ERROR, "STSZ data allocation failed in read_gop_stsz\n");
+        return AVERROR(ENOMEM);
+    }
+
+    stbl_ctx->stsz_box_ctx = box_ctx;    
+    av_log(c->fc, AV_LOG_TRACE, "quick_read_stsz finished\n");
+    return 0;
+}
+
+static int mov_quick_read_stco(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    StblContext *stbl_ctx = c->stbl_ctx;
+    MOVBoxContext box_ctx = {0};
+    AVIOContext *box_pb = NULL;
+    unsigned int entries = 0;
+    
+    // Copy stco box data...
+    uint32_t atom_size = atom.size;
+    box_ctx.box_size = atom_size - 8;
+    box_ctx.box_buffer = av_mallocz(box_ctx.box_size);
+    if (NULL == box_ctx.box_buffer) {
+        av_log(c->fc, AV_LOG_ERROR, "Memory allocation failed in quick_read_stco\n");
+        return AVERROR(ENOMEM);
+    }
+
+    if (avio_read(pb, box_ctx.box_buffer, box_ctx.box_size) < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Reading data failed in quick_read_stco\n");
+        return -1;
+    }
+
+    // get box-private AVIOContext
+    if(create_box_avio_context(&box_ctx, c, &g_stco_bd) < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "Creating box avio_ctx failed in quick_read_stco\n");
+        return -1;
+    }
+    box_pb = box_ctx.pb;
+
+    // get stsz box header
+    avio_r8(box_pb); // version 
+    avio_rb24(box_pb); // flags 
+
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams-1];
+    sc = st->priv_data;
+
+    entries = avio_rb32(box_pb);
+    if (!entries) {
+        av_log(c->fc, AV_LOG_ERROR, "No entry found in stco by read_gop_stco.\n");
+        return -1;
+    }
+    c->stbl_ctx->stco_quick_ctx.total_stco_entry_count = entries;
+
+    if (sc->chunk_offsets)
+        av_log(c->fc, AV_LOG_WARNING, "Duplicated STCO atom\n");
+    av_free(sc->chunk_offsets);
+    sc->chunk_count = 0;
+    sc->chunk_offsets = av_malloc_array(entries, sizeof(*sc->chunk_offsets));
+    if (!sc->chunk_offsets) {
+        av_log(c->fc, AV_LOG_ERROR, "chunk_offsets memory allocation failed in read_gop_stco.\n");
+        return AVERROR(ENOMEM);
+    }
+
+    stbl_ctx->stco_box_ctx = box_ctx;    
+    av_log(c->fc, AV_LOG_TRACE, "quick_read_stco finished\n");
+    return 0;
+}
+
+static const MOVParseTableEntry mov_stbl_parse_table[] = {
+    { MKTAG('s','t','s','d'), mov_read_stsd }, /* sample description */
+    { MKTAG('s','t','t','s'), mov_read_stts },
+    { MKTAG('s','t','s','s'), mov_read_stss },
+    { MKTAG('c','t','t','s'), mov_quick_read_ctts },
+    { MKTAG('s','t','s','c'), mov_read_stsc },
+    { MKTAG('s','t','s','z'), mov_quick_read_stsz },
+    { MKTAG('s','t','c','o'), mov_quick_read_stco },
+    { 0, NULL}
+};
+
+static int read_gop_ctts(MOVContext *c, MOVStreamContext *sc, int frame_count) 
+{
+    int err = 0;
+    unsigned int i, entries, ctts_count = 0;
+    
+    int64_t previous_sample_count=0;
+      
+    AVIOContext *pb = NULL;
+    MOVBoxContext box_ctx = c->stbl_ctx->ctts_box_ctx;
+
+    if (c->stbl_ctx->ctts_quick_ctx.has_finished_ctts == 1) {
+        return 0;
+    }
+
+    pb = box_ctx.pb;
+    if (!pb) {
+        return -1;
+    }
+
+    ctts_count = sc->ctts_count;
+    entries = c->stbl_ctx->ctts_quick_ctx.total_ctts_entry_count - ctts_count;
+    previous_sample_count = c->stbl_ctx->ctts_quick_ctx.previous_sample_count;
+
+    if (entries <= 0) {
+        c->stbl_ctx->ctts_quick_ctx.has_finished_ctts = 1; 
+    }
+
+    for (i = 0; i < entries && !pb->eof_reached; i++) {
+        int count    =avio_rb32(pb);
+        int duration =avio_rb32(pb);
+
+        if (count <= 0) {
+            av_log(c->fc, AV_LOG_TRACE,
+                "ignoring CTTS entry with count=%d duration=%d\n",
+                count, duration);
+            continue;
+        }
+
+        sc->ctts_data[ctts_count].count    = count;
+        sc->ctts_data[ctts_count].duration = duration;
+        ctts_count++;
+        previous_sample_count += count;
+
+        c->stbl_ctx->ctts_box_ctx = box_ctx;
+
+        av_log(c->fc, AV_LOG_TRACE, "ctts index: %d, count=%d, duration=%d\n", ctts_count, count, duration);
+
+        if (FFNABS(duration) < -(1<<28) && i+2<entries) {
+            av_log(c->fc, AV_LOG_WARNING, "CTTS invalid\n");
+            av_freep(&sc->ctts_data);
+            sc->ctts_count = 0;
+            err = AVERROR_INVALIDDATA;
+            goto failed;
+        }
+
+        if (i+2<entries)
+            mov_update_dts_shift(sc, duration);
+
+        if (ctts_count == c->stbl_ctx->ctts_quick_ctx.total_ctts_entry_count) {
+            c->stbl_ctx->ctts_quick_ctx.has_finished_ctts = 1;
+            av_log(c->fc, AV_LOG_TRACE, "All %d  ctts entries have been parsed.\n", count);
+            break;
+        }
+        if (previous_sample_count > frame_count)
+            break;
+    } 
+
+    sc->ctts_count = ctts_count;
+    c->stbl_ctx->ctts_quick_ctx.previous_sample_count = previous_sample_count;
+
+    if (c->stbl_ctx->ctts_quick_ctx.has_finished_ctts == 1) {
+        av_log(c->fc, AV_LOG_TRACE, "CTTS parsing finished, clean ctts context.\n");
+        err = 0;
+        goto failed;
+    }
+
+    av_log(c->fc, AV_LOG_TRACE, "dts shift %d\n", sc->dts_shift);
+    return 0;
+
+failed:
+    if (pb) {
+        av_freep(&pb->buffer);
+        av_freep(&pb);
+    }   
+
+    return err;
+}
+
+static int read_gop_stsz(MOVContext *c, MOVStreamContext *sc, int frame_count) 
+{
+    int err = 0;
+
+    unsigned int i, sample_count, sample_size, field_size;
+    unsigned int stsz_sample_index = 0;
+
+    AVIOContext *pb = NULL;
+    MOVBoxContext box_ctx = c->stbl_ctx->stsz_box_ctx;
+
+    if (c->stbl_ctx->stsz_quick_ctx.has_finished_stsz == 1) {
+        return 0;
+    }
+
+    {
+        pb = box_ctx.pb;
+        sample_count = c->stbl_ctx->stsz_quick_ctx.total_stsz_sample_count - c->stbl_ctx->stsz_quick_ctx.previous_sample_count;
+        stsz_sample_index = c->stbl_ctx->stsz_quick_ctx.stsz_sample_index;
+    }
+
+    for (i = 0; i < sample_count && !pb->eof_reached; i++) {
+        sc->sample_sizes[stsz_sample_index] = avio_rb32(pb);
+        sc->data_size += sc->sample_sizes[stsz_sample_index];
+        av_log(c->fc, AV_LOG_TRACE, "sample size: sample: %d, size=%d\n", stsz_sample_index, sc->sample_sizes[stsz_sample_index]);
+        stsz_sample_index++;
+
+        if (stsz_sample_index == c->stbl_ctx->stsz_quick_ctx.total_stsz_sample_count) {
+            av_log(c->fc, AV_LOG_TRACE, "All %d  stsz entries have been parsed.\n", stsz_sample_index);
+            c->stbl_ctx->stsz_quick_ctx.has_finished_stsz = 1;
+            break;
+        }
+
+        if (stsz_sample_index > frame_count) {
+            break;
+        }
+    }
+    c->stbl_ctx->stsz_quick_ctx.stsz_sample_index = stsz_sample_index;
+    c->stbl_ctx->stsz_quick_ctx.previous_sample_count = stsz_sample_index;
+    sc->sample_count = stsz_sample_index;
+    c->stbl_ctx->stsz_box_ctx = box_ctx;
+    
+    return 0;
+
+failed:
+    if (pb) {
+        av_freep(&pb->buffer);
+        av_freep(&pb);
+    }
+    return err;
+}
+
+static int read_gop_stco(MOVContext *c, MOVStreamContext *sc, int frame_count) 
+{
+    int err = 0;
+    unsigned int i = 0, entries = 0, entries_rem = 0, stco_index = 0;
+
+    AVIOContext *pb = NULL;
+    MOVBoxContext box_ctx = c->stbl_ctx->stco_box_ctx;
+
+    if (c->stbl_ctx->stco_quick_ctx.has_finished_stco == 1) {
+        return 0;
+    }
+    
+    {
+        pb = box_ctx.pb;
+        stco_index = c->stbl_ctx->stco_quick_ctx.stco_chunk_index;
+        entries_rem = c->stbl_ctx->stco_quick_ctx.total_stco_entry_count - c->stbl_ctx->stco_quick_ctx.stco_chunk_index;
+    }
+
+    for (i = 0; i < entries_rem && !pb->eof_reached; i++) {
+        sc->chunk_offsets[stco_index] = avio_rb32(pb);
+        av_log(c->fc, AV_LOG_TRACE, "chunk idx: %d, offset: %lld\n", stco_index, sc->chunk_offsets[stco_index]);
+        stco_index++;
+
+        if (stco_index == c->stbl_ctx->stco_quick_ctx.total_stco_entry_count) {
+            av_log(c->fc, AV_LOG_TRACE, "All %d  stco entries have been parsed.\n", stco_index);
+            c->stbl_ctx->stco_quick_ctx.has_finished_stco = 1;
+            break;
+        }
+
+        if (stco_index > frame_count) {
+            break;
+        }
+    }
+    c->stbl_ctx->stco_quick_ctx.stco_chunk_index = stco_index;
+    c->stbl_ctx->stco_box_ctx = box_ctx;
+    sc->chunk_count += stco_index;
+
+    return 0;
+failed:
+    if (pb) {
+        av_freep(&pb->buffer);
+        av_freep(&pb);
+    }
+    return err;
+}
+
+static void clear_stbl_context(MOVContext *c)
+{
+    StblContext *stbl_ctx = c->stbl_ctx;
+    AVStream *video_stream = NULL;
+    MOVStreamContext *sc = NULL;
+    AVIOContext *pb = NULL;
+
+    video_stream = c->fc->streams[g_video_stream_index];
+    if (!video_stream) {
+        av_log(c->fc, AV_LOG_ERROR, "No video stream found in file\n");
+        return;
+    }
+    
+    if (stbl_ctx) {
+        pb = stbl_ctx->ctts_box_ctx.pb;
+        if (pb) {
+            av_freep(&pb->buffer);
+//            av_freep(&pb);
+        }
+        pb = stbl_ctx->stsz_box_ctx.pb;
+        if (pb) {
+            av_freep(&pb->buffer);
+            av_freep(&pb);
+        }
+        pb = stbl_ctx->stco_box_ctx.pb;
+        if (pb) {
+            av_freep(&pb->buffer);
+            av_freep(&pb);
+        }
+        
+        if (stbl_ctx->ctts_box_ctx.box_buffer) {
+            av_free(stbl_ctx->ctts_box_ctx.box_buffer);
+            stbl_ctx->ctts_box_ctx.box_buffer = NULL;
+        }
+        if (stbl_ctx->stsz_box_ctx.box_buffer) {
+            av_free(stbl_ctx->stsz_box_ctx.box_buffer);
+            stbl_ctx->stsz_box_ctx.box_buffer = NULL;
+        }
+        if (stbl_ctx->stco_box_ctx.box_buffer) {
+            av_free(stbl_ctx->stco_box_ctx.box_buffer);
+            stbl_ctx->stco_box_ctx.box_buffer = NULL;
+        }
+
+        av_free(c->stbl_ctx);
+        c->stbl_ctx = NULL;
+    }
+
+    sc = video_stream->priv_data;
+    if (sc) {
+        /* Do not need those anymore. */
+        av_freep(&sc->chunk_offsets);
+        av_freep(&sc->sample_sizes);
+        av_freep(&sc->keyframes);
+        av_freep(&sc->stts_data);
+        av_freep(&sc->stps_data);
+        av_freep(&sc->elst_data);
+        av_freep(&sc->rap_group);
+    }
+}
+
+static int get_gop_info(MOVContext *c, int gop_count)
+{
+    AVStream *st = NULL;
+    MOVStreamContext *sc = NULL;
+    int nb_keyframes_to_parse = c->keyframes_parsed;
+
+    if (c->fc->nb_streams < 1)
+        return -1;
+    
+    for (int idx = 0; idx < c->fc->nb_streams; idx++) {
+        if (c->fc->streams[idx]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            st = c->fc->streams[idx];
+            break;
+        }
+    }
+    
+    if (!st) {
+        av_log(c->fc, AV_LOG_ERROR, "ERROR: No video stream found.\n");
+        return -1;
+    }
+    sc = st->priv_data;
+
+    int ret = 0, next_key_frame = 0;
+    if (gop_count < 1)
+        gop_count = 1;
+    
+    if (c->keyframes_parsed >= sc->keyframe_count) {
+        av_log(c->fc, AV_LOG_ERROR, "ERROR: no GOPs left in video stream.\n");
+        goto clean;
+    } else if(c->keyframes_parsed + gop_count < sc->keyframe_count) {
+        nb_keyframes_to_parse += gop_count;
+        next_key_frame = sc->keyframes[nb_keyframes_to_parse];
+    }
+    else{
+        nb_keyframes_to_parse = sc->keyframe_count;
+        next_key_frame = c->stbl_ctx->stsz_quick_ctx.total_stsz_sample_count;
+    } 
+    
+    while ((next_key_frame < 100) && (c->keyframes_parsed < sc->keyframe_count - 1)) {
+        nb_keyframes_to_parse++;
+        next_key_frame = sc->keyframes[nb_keyframes_to_parse];
+    }
+
+    ret = read_gop_stsz(c, sc, next_key_frame);
+    if (ret < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "ERROR: read_gop_stsz failed. GOP index: %d\n", c->keyframes_parsed);
+        return -1;
+    }
+
+    ret = read_gop_ctts(c, sc, next_key_frame);
+    if (ret < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "ERROR: read_gop_ctts failed. GOP index: %d\n", c->keyframes_parsed);
+        return -1;
+    }
+
+    ret = read_gop_stco(c, sc, next_key_frame);
+    if (ret < 0) {
+        av_log(c->fc, AV_LOG_ERROR, "ERROR: read_gop_stco failed. GOP index: %d\n", c->keyframes_parsed);
+        return -1;
+    }
+
+    gop_build_index(c, st, next_key_frame);
+
+    c->total_frames_parsed += next_key_frame;
+    c->keyframes_parsed = nb_keyframes_to_parse;
+    c->fc->parsed_gops = c->keyframes_parsed;
+    c->fc->last_video_dts = st->index_entries[st->nb_index_entries - 1].timestamp;
+
+//    trace_mp4_AVIndexEntries_info_video(c, 0, st->nb_index_entries);
+
+    return 1;
+
+clean:
+    c->fc->parsing_completed = 1;
+    clear_stbl_context(c);
+    return 0;
+}
+
+static int mov_read_stbl(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    int64_t total_size = 0;
+    MOVAtom a;
+    int i;
+    AVStream *st = c->fc->streams[c->trak_index];
+    MOVStreamContext *sc = st->priv_data;
+
+    enum AVMediaType mt = st->codecpar->codec_type;
+    if (mt != AVMEDIA_TYPE_VIDEO) {
+        return mov_read_default(c, pb, atom);
+    }
+
+    if (c->atom_depth > 10) {
+        av_log(c->fc, AV_LOG_ERROR, "Atoms too deeply nested\n");
+        return AVERROR_INVALIDDATA;
+    }
+    c->atom_depth ++;
+
+    c->stbl_ctx = (StblContext *)av_mallocz(sizeof(StblContext));
+    c->keyframes_parsed = 0;
+    c->total_frames_parsed = 0;
+    c->stbl_ctx->stco_quick_ctx.parsed_stco_chunk_index = 0;
+    c->stbl_ctx->stsc_quick_ctx.parsed_stsc_index = 0;
+    c->stbl_ctx->stsz_quick_ctx.parsed_stsz_index = 0;
+    c->stbl_ctx->parsed_ts_index = 0;
+    c->stbl_ctx->current_dts = 0;
+    c->stbl_ctx->key_distance = 0;
+
+    if (atom.size < 0)
+        atom.size = INT64_MAX;
+    while (total_size + 8 <= atom.size && !avio_feof(pb)) {
+        int (*parse)(MOVContext*, AVIOContext*, MOVAtom) = NULL;
+        a.size = atom.size;
+        a.type=0;
+        if (atom.size >= 8) {
+            a.size = avio_rb32(pb);
+            a.type = avio_rl32(pb);
+            if (a.size == 1 && total_size + 8 <= atom.size) { /* 64 bit extended size */
+                a.size = avio_rb64(pb) - 8;
+                total_size += 8;
+            }
+        }
+
+         av_log(c->fc, AV_LOG_TRACE, "type: %08x '%.4s' parent:'%.4s' sz: %"PRId64" %"PRId64" %"PRId64"\n",
+                a.type, (char*)&a.type, (char*)&atom.type, a.size, total_size, atom.size);
+                
+        if (a.size == 0) {
+            a.size = atom.size - total_size + 8;            
+        }
+        
+        a.size -= 8;
+        if (a.size < 0)
+            break;
+        a.size = FFMIN(a.size, atom.size - total_size);
+
+        for (i = 0; mov_stbl_parse_table[i].type; i++)
+            if (mov_stbl_parse_table[i].type == a.type) {
+                parse = mov_stbl_parse_table[i].parse;
+                break;
+            }
+
+        if (!parse) { /* skip leaf atoms data */
+            avio_skip(pb, a.size);
+        } else {
+            int64_t start_pos = avio_tell(pb);
+            int64_t left;
+            int err = parse(c, pb, a);
+            if (err < 0) {
+                c->atom_depth --;
+                clear_stbl_context(c);
+                return err;
+            }
+            
+            left = a.size - avio_tell(pb) + start_pos;
+            if (left > 0) /* skip garbage at atom end */
+                avio_skip(pb, left);
+            else if (left < 0) {
+                av_log(c->fc, AV_LOG_WARNING,
+                       "overread end of atom '%.4s' by %"PRId64" bytes\n",
+                       (char*)&a.type, -left);
+                avio_seek(pb, left, SEEK_CUR);
+            }
+        }
+
+        total_size += a.size;
+    }
+
+    if (total_size < atom.size && atom.size < 0x7ffff)
+        avio_skip(pb, atom.size - total_size);
+
+    c->atom_depth --;
+
+    c->fc->total_gops = sc->keyframe_count;
+    c->fc->parsed_gops = 0;
+
+    return 0;
+}
+
+static int mov_quick_read_trak(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    int ret;
+
+    st = avformat_new_stream(c->fc, NULL);
+    if (!st) return AVERROR(ENOMEM);
+    st->id = c->fc->nb_streams;
+    sc = av_mallocz(sizeof(MOVStreamContext));
+    if (!sc) return AVERROR(ENOMEM);
+
+    st->priv_data = sc;
+    st->codecpar->codec_type = AVMEDIA_TYPE_DATA;
+    sc->ffindex = st->index;
+    c->trak_index = st->index;
+
+    if ((ret = mov_read_default(c, pb, atom)) < 0)
+        return ret;
+
+    c->trak_index = -1;
+
+    /* sanity checks */
+    if (sc->chunk_count && (!sc->stts_count || !sc->stsc_count || (!sc->sample_size && !sc->sample_count))) {
+        av_log(c->fc, AV_LOG_ERROR, "stream %d, missing mandatory atoms, broken header\n",
+               st->index);
+        return -1;
+    }
+
+    fix_timescale(c, sc);
+
+    avpriv_set_pts_info(st, 64, 1, sc->time_scale);
+
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (get_gop_info(c, 2) < 0) {
+            av_log(c->fc, AV_LOG_ERROR, "Get GOP info failed.\n");
+            clear_stbl_context(c);
+            return -1;
+        }
+    } else {
+        mov_build_index(c, st);
+    }
+
+    sc->pb = c->fc->pb;
+    sc->pb_is_copied = 1;
+
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (sc->stts_count == 1 || (sc->stts_count == 2 && sc->stts_data[1].count == 1)) {
+            av_reduce(&st->r_frame_rate.num, &st->r_frame_rate.den, sc->time_scale, sc->stts_data[0].duration, INT_MAX);
+        }
+    }
+    return 0;
+}
+
 static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('A','C','L','R'), mov_read_aclr },
 { MKTAG('A','P','R','G'), mov_read_avid },
@@ -5428,6 +6431,18 @@ static int mov_read_default(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             atom.type == MKTAG('m','e','t','a') &&
             a.type == MKTAG('k','e','y','s')) {
             parse = mov_read_keys;
+        }
+
+        if (c->quick_read &&
+            a.type == MKTAG('t','r','a','k')) {
+            av_log(c->fc, AV_LOG_TRACE, "Detected trak in a quick reading mp4 header mode.\n");
+            parse = mov_quick_read_trak;
+        }
+
+        if (c->quick_read &&
+            a.type == MKTAG('s','t','b','l')) {
+            av_log(c->fc, AV_LOG_TRACE, "Detected stbl in a quick reading mp4 header mode.\n");
+            parse = mov_read_stbl;
         }
 
         if (!parse) { /* skip leaf atoms data */
@@ -6127,6 +7142,40 @@ static int mov_read_header(AVFormatContext *s)
     return 0;
 }
 
+static int mov_quick_read_header(AVFormatContext *s)
+{
+    MOVContext *mov = s->priv_data;
+    if( s->quick_parse_mp4) {
+        mov->quick_read = 1;
+//        s->flags |= AVFMT_FLAG_NOBUFFER;
+    }
+    
+    return mov_read_header(s);
+}
+
+static int mov_get_gop_info(AVFormatContext *fmt_ctx)
+{
+    if (!fmt_ctx) {
+        return -1;
+    }
+
+    MOVContext *mov = fmt_ctx->priv_data;
+
+    int total_gops = fmt_ctx->total_gops, currt_gops = fmt_ctx->parsed_gops;
+    if (currt_gops > total_gops) {
+        av_log(fmt_ctx, AV_LOG_TRACE, "All gops have been parsed\n");
+        clear_stbl_context(mov);
+        return -1;
+    }
+
+    if (get_gop_info(mov, 1) < 0) {
+        return -1;
+    }
+//      trace_mp4_AVIndexEntries_info_video(mov, 0, fmt_ctx->streams[mov->trak_index]->nb_index_entries);
+
+    return 0;
+}
+
 static AVIndexEntry *mov_find_next_sample(AVFormatContext *s, AVStream **st)
 {
     AVIndexEntry *sample = NULL;
@@ -6461,6 +7510,40 @@ static int mov_seek_stream(AVFormatContext *s, AVStream *st, int64_t timestamp, 
     return sample;
 }
 
+static int mov_restore_index_entries(AVFormatContext *s)
+{
+    int err = 0;
+    AVStream *video_stream = NULL;
+    MOVContext *mov = s->priv_data;
+    
+    if (!s) {
+        return -1;
+    }
+
+    for (int i = 0; i < mov->fc->nb_streams; i++) {
+        enum AVMediaType mt = mov->fc->streams[i]->codecpar->codec_type;
+        if (mt == AVMEDIA_TYPE_VIDEO) {
+            video_stream = mov->fc->streams[i];
+            break;
+        }
+    }
+
+    if (!video_stream) {
+        av_log(mov->fc, AV_LOG_ERROR, "No video stream found in file when restoring video index entries.\n");
+        return -1;
+    }
+ 
+    err = get_gop_info(mov, INT_MAX);
+    if (err >= 0) {
+        av_log(s, AV_LOG_TRACE, "All gops have been parsed\n");
+        s->parsing_completed = 1;
+        clear_stbl_context(mov);
+        return 0;
+    }
+
+    return 0;
+}
+
 static int mov_read_seek(AVFormatContext *s, int stream_index, int64_t sample_time, int flags)
 {
     MOVContext *mc = s->priv_data;
@@ -6470,6 +7553,10 @@ static int mov_read_seek(AVFormatContext *s, int stream_index, int64_t sample_ti
 
     if (stream_index >= s->nb_streams)
         return AVERROR_INVALIDDATA;
+    
+    if (s->quick_parse_mp4 && !s->parsing_completed) {
+        mov_restore_index_entries(s);
+    }
 
     st = s->streams[stream_index];
     sample = mov_seek_stream(s, st, sample_time, flags);
@@ -6574,7 +7661,8 @@ AVInputFormat ff_mov_demuxer = {
     .priv_data_size = sizeof(MOVContext),
     .extensions     = "mov,mp4,m4a,3gp,3g2,mj2",
     .read_probe     = mov_probe,
-    .read_header    = mov_read_header,
+    .read_header    = mov_quick_read_header,
+    .quick_get_gop_info = mov_get_gop_info,
     .read_packet    = mov_read_packet,
     .read_close     = mov_read_close,
     .read_seek      = mov_read_seek,
