@@ -1922,6 +1922,15 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    /**
+     * Ijk: AVFormat status code.
+     * Values:
+     *  0:  no error;
+     *  -1: failed when opening input file in quick-parsing mode;
+     *  -2: failed when playing in quick-parsing mode;
+    */
+    int demuxer_status_code;
 } AVFormatContext;
 
 /**
