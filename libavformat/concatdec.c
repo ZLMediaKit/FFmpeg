@@ -189,6 +189,12 @@ static int copy_stream_props(AVStream *st, AVStream *source_st)
     st->time_base           = source_st->time_base;
     st->sample_aspect_ratio = source_st->sample_aspect_ratio;
 
+    /* Fix wrap control problem */
+    avpriv_set_pts_info(st, source_st->pts_wrap_bits,
+                        source_st->time_base.num, source_st->time_base.den);
+    st->pts_wrap_behavior   = source_st->pts_wrap_behavior;
+    st->pts_wrap_reference  = source_st->pts_wrap_reference;
+
     av_dict_copy(&st->metadata, source_st->metadata, 0);
     return 0;
 }
