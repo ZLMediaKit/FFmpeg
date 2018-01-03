@@ -1975,10 +1975,8 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
                         pkt_ts = AV_NOPTS_VALUE;
 
 
-                    if (c->first_timestamp == AV_NOPTS_VALUE &&
-                        pkt_ts       != AV_NOPTS_VALUE)
-                        c->first_timestamp = av_rescale_q(pkt_ts,
-                            get_timebase(pls), AV_TIME_BASE_Q);
+                    c->first_timestamp = s->start_time != AV_NOPTS_VALUE ? s->start_time : 0;
+
                 }
 
                 if (pls->seek_timestamp == AV_NOPTS_VALUE)
