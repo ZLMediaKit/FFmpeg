@@ -209,6 +209,8 @@ typedef struct HLSContext {
     int strict_std_compliance;
     char *allowed_extensions;
     int max_reload;
+    int hls_io_protocol_enable;
+    char * hls_io_protocol;
 } HLSContext;
 
 static int read_chomp_line(AVIOContext *s, char *buf, int maxlen)
@@ -634,6 +636,8 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
         }
     } else if (av_strstart(proto_name, "http", NULL)) {
         ;
+    } else if (c->hls_io_protocol_enable) {
+        ;
     } else
         return AVERROR_INVALIDDATA;
 
@@ -678,6 +682,7 @@ static int parse_playlist(HLSContext *c, const char *url,
     int has_iv = 0;
     char key[MAX_URL_SIZE] = "";
     char line[MAX_URL_SIZE];
+    char io_url[MAX_URL_SIZE] = "";
     const char *ptr;
     int close_in = 0;
     int64_t seg_offset = 0;
@@ -692,6 +697,9 @@ static int parse_playlist(HLSContext *c, const char *url,
 #if 1
         AVDictionary *opts = NULL;
         close_in = 1;
+
+        av_dict_copy(&opts, c->avio_opts, 0);
+
         /* Some HLS servers don't like being sent the range header */
         av_dict_set(&opts, "seekable", "0", 0);
 
@@ -848,7 +856,22 @@ static int parse_playlist(HLSContext *c, const char *url,
                 }
 
                 ff_make_absolute_url(tmp_str, sizeof(tmp_str), url, line);
-                seg->url = av_strdup(tmp_str);
+
+                if (c->hls_io_protocol_enable) {
+                    char * url_start = NULL;
+                    if (c->hls_io_protocol) {
+                        strcpy(io_url, c->hls_io_protocol);
+                    } else if ((url_start =  strstr(url,"http://")) ||
+                                (url_start =  strstr(url,"https://"))) {
+                        strncpy(io_url, url, url_start - url);
+                    }
+                    av_strlcat(io_url, tmp_str, sizeof(io_url));
+                    seg->url = av_strdup(io_url);
+                    memset(io_url, 0, sizeof(io_url));
+                } else {
+                    seg->url = av_strdup(tmp_str);
+                }
+
                 if (!seg->url) {
                     av_free(seg->key);
                     av_free(seg);
@@ -1357,7 +1380,13 @@ reload:
                 return AVERROR_EXIT;
             av_log(v->parent, AV_LOG_WARNING, "Failed to open segment of playlist %d\n",
                    v->index);
-            v->cur_seq_no += 1;
+
+            if (c->hls_io_protocol_enable && (parse_playlist(c, v->url, v, NULL)) < 0) {
+                av_log(NULL, AV_LOG_INFO, "Failed to reload playlist %d\n",
+                       v->index);
+            } else {
+                v->cur_seq_no += 1;
+            }
             goto reload;
         }
         just_opened = 1;
@@ -1956,8 +1985,15 @@ static int hls_read_packet(AVFormatContext *s, AVPacket *pkt)
                 AVRational tb;
                 ret = av_read_frame(pls->ctx, &pls->pkt);
                 if (ret < 0) {
-                    if (!avio_feof(&pls->pb) && ret != AVERROR_EOF)
+                    //when error occur try to renew m3u8
+                    if (c->hls_io_protocol_enable && (parse_playlist(c, pls->url, pls, NULL)) < 0) {
+                        av_log(NULL, AV_LOG_INFO, "Failed to reload playlist %d\n",
+                               pls->index);
+                    }
+
+                    if (!avio_feof(&pls->pb) && ret != AVERROR_EOF) {
                         return ret;
+                    }
                     reset_packet(&pls->pkt);
                     break;
                 } else {
@@ -2205,6 +2241,10 @@ static const AVOption hls_options[] = {
         INT_MIN, INT_MAX, FLAGS},
     {"max_reload", "Maximum number of times a insufficient list is attempted to be reloaded",
         OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 1000}, 0, INT_MAX, FLAGS},
+    {"hls_io_protocol", "force segment io protocol",
+        OFFSET(hls_io_protocol), AV_OPT_TYPE_STRING, {.str= NULL}, 0, 0, FLAGS},
+    {"hls_io_protocol_enable", "enable auto copy segment io protocol from playlist",
+        OFFSET(hls_io_protocol_enable), AV_OPT_TYPE_BOOL, {.i64= 0}, 0, 1, FLAGS},
     {NULL}
 };
 
