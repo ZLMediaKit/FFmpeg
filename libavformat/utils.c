@@ -3522,6 +3522,35 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     int eof_reached = 0;
     int *missing_streams = av_opt_ptr(ic->iformat->priv_class, ic->priv_data, "missing_streams");
 
+    AVDictionaryEntry *t;
+
+    t = av_dict_get(ic->metadata, "nb-streams", NULL, AV_DICT_MATCH_CASE);
+    if (t) {
+        int nb_streams = (int) strtol(t->value, NULL, 10);
+        if (nb_streams > 0) {
+            while (ic->nb_streams < nb_streams) {
+                ret = read_frame_internal(ic, &pkt1);
+                if (ret == AVERROR(EAGAIN))
+                    continue;
+                if (ret < 0) {
+                    /* EOF or error*/
+                    eof_reached = 1;
+                    break;
+                }
+                pkt = &pkt1;
+
+                if (!(ic->flags & AVFMT_FLAG_NOBUFFER)) {
+                    ret = add_to_pktbuf(&ic->internal->packet_buffer, pkt,
+                                        &ic->internal->packet_buffer_end, 0);
+                    if (ret < 0)
+                        return ret;
+                }
+            }
+            av_dict_set_int(&ic->metadata, "nb-streams", 0, 0);
+            return ret;
+        }
+    }
+
     flush_codecs = probesize > 0;
 
     av_opt_set(ic, "skip_clear", "1", AV_OPT_SEARCH_CHILDREN);
