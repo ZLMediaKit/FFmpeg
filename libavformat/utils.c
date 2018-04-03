@@ -3528,7 +3528,11 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
     if (t) {
         int nb_streams = (int) strtol(t->value, NULL, 10);
         if (nb_streams > 0) {
+            int64_t read_size = 0;
             while (ic->nb_streams < nb_streams) {
+                if (read_size >= probesize)
+                    return ic->nb_streams;
+
                 ret = read_frame_internal(ic, &pkt1);
                 if (ret == AVERROR(EAGAIN))
                     continue;
@@ -3539,6 +3543,9 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
                 }
                 pkt = &pkt1;
 
+                if (!(ic->streams[pkt->stream_index]->disposition & AV_DISPOSITION_ATTACHED_PIC))
+                    read_size += pkt->size;
+
                 if (!(ic->flags & AVFMT_FLAG_NOBUFFER)) {
                     ret = add_to_pktbuf(&ic->internal->packet_buffer, pkt,
                                         &ic->internal->packet_buffer_end, 0);
@@ -3547,7 +3554,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
                 }
             }
             av_dict_set_int(&ic->metadata, "nb-streams", 0, 0);
-            return ret;
+            return ret < 0 ? ret : ic->nb_streams;
         }
     }
 
