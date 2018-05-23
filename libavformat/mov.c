@@ -3633,7 +3633,7 @@ static int gop_build_index(MOVContext *mov, AVStream *st, int last_frame_to_pars
         }
         this_chunk_index++;
 
-        if (this_sample_index > last_frame_to_parse) {
+        if (this_sample_index >= last_frame_to_parse) {
             goto end;
         }
     }
