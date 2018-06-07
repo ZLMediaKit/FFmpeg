@@ -3529,9 +3529,12 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
         int nb_streams = (int) strtol(t->value, NULL, 10);
         if (nb_streams > 0) {
             int64_t read_size = 0;
-            while (ic->nb_streams < nb_streams) {
-                if (read_size >= probesize)
+            int found_all_streams = 0;
+            while (!found_all_streams) {
+                if (read_size >= probesize) {
+                    av_log(NULL, AV_LOG_INFO, "probe fail\n");
                     return ic->nb_streams;
+                }
 
                 ret = read_frame_internal(ic, &pkt1);
                 if (ret == AVERROR(EAGAIN))
@@ -3551,6 +3554,24 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
                                         &ic->internal->packet_buffer_end, 0);
                     if (ret < 0)
                         return ret;
+                }
+
+                for(i = 0; i < ic->nb_streams; i++) {
+                    int64_t cur_start_time = AV_NOPTS_VALUE;
+                    if (ic->streams[i]->start_time != AV_NOPTS_VALUE) {
+                        cur_start_time = av_rescale_q(ic->streams[i]->start_time,
+                                                        ic->streams[i]->time_base,
+                                                        AV_TIME_BASE_Q);
+                    }
+                    if (cur_start_time != AV_NOPTS_VALUE &&
+                        (ic->start_time == AV_NOPTS_VALUE || ic->start_time > cur_start_time)){
+                       ic->start_time = cur_start_time;
+                    }
+                }
+
+                if (ic->nb_streams >= nb_streams && ic->start_time != AV_NOPTS_VALUE) {
+                    av_log(NULL, AV_LOG_INFO, "probe pass\n");
+                    found_all_streams  = 1;
                 }
             }
             av_dict_set_int(&ic->metadata, "nb-streams", 0, 0);
