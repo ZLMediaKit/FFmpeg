@@ -146,6 +146,7 @@ typedef struct DASHContext {
     char *user_agent;                    ///< holds HTTP user agent set as an AVOption to the HTTP protocol context
     char *cookies;                       ///< holds HTTP cookie values set in either the initial response or as an AVOption to the HTTP protocol context
     char *headers;                       ///< holds HTTP headers set as an AVOption to the HTTP protocol context
+    char *http_proxy;
     char *allowed_extensions;
     AVDictionary *avio_opts;
     int max_url_size;
@@ -378,6 +379,7 @@ static void set_httpheader_options(DASHContext *c, AVDictionary **opts)
     av_dict_set(opts, "user-agent", c->user_agent, 0);
     av_dict_set(opts, "cookies", c->cookies, 0);
     av_dict_set(opts, "headers", c->headers, 0);
+    av_dict_set(opts, "http_proxy", c->http_proxy, 0);
     if (c->is_live) {
         av_dict_set(opts, "seekable", "0", 0);
     }
@@ -422,6 +424,8 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
             return AVERROR_INVALIDDATA;
         }
     } else if (av_strstart(proto_name, "http", NULL)) {
+        ;
+    } else if (av_strstart(proto_name, "ijk", NULL)) {
         ;
     } else
         return AVERROR_INVALIDDATA;
@@ -583,7 +587,7 @@ static struct fragment * get_Fragment(char *range)
         char *str_end_offset;
         char *str_offset = av_strtok(range, "-", &str_end_offset);
         seg->url_offset = strtoll(str_offset, NULL, 10);
-        seg->size = strtoll(str_end_offset, NULL, 10) - seg->url_offset;
+        seg->size = strtoll(str_end_offset, NULL, 10) - seg->url_offset + 1;
     }
 
     return seg;
@@ -1580,6 +1584,7 @@ static int open_input(DASHContext *c, struct representation *pls, struct fragmen
     }
 
     ff_make_absolute_url(url, c->max_url_size, c->base_url, seg->url);
+
     av_log(pls->parent, AV_LOG_VERBOSE, "DASH request for url '%s', offset %"PRId64", playlist %d\n",
            url, seg->url_offset, pls->rep_idx);
     ret = open_url(pls->parent, &pls->input, url, c->avio_opts, opts, NULL);
@@ -1646,6 +1651,9 @@ static int64_t seek_data(void *opaque, int64_t offset, int whence)
 {
     struct representation *v = opaque;
     if (v->n_fragments && !v->init_sec_data_len) {
+        //avio_size not support AVSEEK_SIZE
+        if (whence == AVSEEK_SIZE && v->input && v->input->seek)
+            return v->input->seek(v->input->opaque, offset, whence);
         return avio_seek(v->input, offset, whence);
     }
 
@@ -1679,7 +1687,11 @@ restart:
                 ret = AVERROR_EXIT;
             }
             av_log(v->parent, AV_LOG_WARNING, "Failed to open fragment of playlist %d\n", v->rep_idx);
-            v->cur_seq_no++;
+            if (refresh_manifest(v->parent) < 0) {
+                av_log(NULL, AV_LOG_INFO, "Failed to reload playlist %d\n", v->rep_idx);
+            } else {
+                v->cur_seq_no++;
+            }
             goto restart;
         }
     }
@@ -1718,7 +1730,7 @@ end:
 static int save_avio_options(AVFormatContext *s)
 {
     DASHContext *c = s->priv_data;
-    const char *opts[] = { "headers", "user_agent", "user-agent", "cookies", NULL }, **opt = opts;
+    const char *opts[] = { "headers", "user_agent", "user-agent", "cookies", "http_proxy", NULL }, **opt = opts;
     uint8_t *buf = NULL;
     int ret = 0;
 
@@ -2023,6 +2035,10 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
             ret = reopen_demux_for_component(s, cur);
             cur->is_restart_needed = 0;
         }
+        //when error occur try to renew mpd
+        if (refresh_manifest(s) < 0) {
+            av_log(NULL, AV_LOG_INFO, "Failed to reload mpd\n");
+        }
     }
     return AVERROR_EOF;
 }
@@ -2118,8 +2134,14 @@ static int dash_read_seek(AVFormatContext *s, int stream_index, int64_t timestam
 
     /* Seek in discarded streams with dry_run=1 to avoid reopening them */
     for (i = 0; i < c->n_videos; i++) {
-        if (!ret)
+        if (!ret) {
             ret = dash_seek(s, c->videos[i], seek_pos_msec, flags, !c->videos[i]->ctx);
+            if (c->videos[i]->ctx) {
+                //FIXME: only first stream
+                AVStream * st = c->videos[i]->ctx->streams[0];
+                seek_pos_msec = av_rescale_q(st->seek_result, st->time_base, AV_TIME_BASE_Q) / 1000;
+            }
+        }
     }
     for (i = 0; i < c->n_audios; i++) {
         if (!ret)

@@ -1217,6 +1217,12 @@ typedef struct AVStream {
      * Must not be accessed in any way by callers.
      */
     AVStreamInternal *internal;
+    /**
+     *
+     * Only for seek usage
+     *
+     */
+    int64_t seek_result;
 } AVStream;
 
 #if FF_API_FORMAT_GET_SET
