@@ -344,7 +344,7 @@ static void free_representation(struct representation *pls)
     free_fragment(&pls->init_section);
     av_freep(&pls->init_sec_buf);
     av_freep(&pls->pb.buffer);
-    if (pls->input)
+    if (pls->input && pls->parent)
         ff_format_io_close(pls->parent, &pls->input);
     if (pls->ctx) {
         pls->ctx->pb = NULL;
@@ -1483,6 +1483,9 @@ static struct fragment *get_current_fragment(struct representation *pls)
     int64_t max_seq_no = 0;
     struct fragment *seg = NULL;
     struct fragment *seg_ptr = NULL;
+
+    if (!pls->parent)
+        return NULL;
     DASHContext *c = pls->parent->priv_data;
 
     while (( !ff_check_interrupt(c->interrupt_callback)&& pls->n_fragments > 0)) {
@@ -1680,6 +1683,8 @@ static int read_data(void *opaque, uint8_t *buf, int buf_size)
 {
     int ret = 0;
     struct representation *v = opaque;
+    if (!v->parent)
+        return AVERROR_EOF;
     DASHContext *c = v->parent->priv_data;
 
 restart:
@@ -1887,6 +1892,10 @@ static int open_demux_for_component(AVFormatContext *s, struct representation *p
     pls->parent = s;
     pls->cur_seq_no  = calc_cur_seg_no(s, pls);
 
+    if (!pls->parent) {
+        ret = AVERROR_EOF;
+        goto fail;
+    }
     if (!pls->last_seq_no) {
         pls->last_seq_no = calc_max_seg_no(pls, s->priv_data);
     }
