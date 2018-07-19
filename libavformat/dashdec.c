@@ -762,8 +762,9 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
     node = baseurl_nodes[rootId];
     baseurl = xmlNodeGetContent(node);
     root_url = (av_strcasecmp(baseurl, "")) ? baseurl : path;
+    av_log(NULL, AV_LOG_INFO, "root url = %s\n", root_url);
     if (node) {
-        xmlNodeSetContent(node, root_url);
+        xmlNodeAddContent(node, root_url);
         updated = 1;
     }
 
@@ -787,7 +788,8 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
             }
             start = (text[0] == token);
             av_strlcat(tmp_str, text + start, tmp_max_url_size);
-            xmlNodeSetContent(baseurl_nodes[i], tmp_str);
+            xmlNodeAddContent(baseurl_nodes[i], tmp_str);
+            av_log(NULL, AV_LOG_INFO, "set  baseurl_nodes[%d] url = %s\n", i, tmp_str);
             updated = 1;
             xmlFree(text);
         }
@@ -1384,7 +1386,7 @@ static void move_segments(struct representation *rep_src, struct representation 
             rep_dest->cur_seq_no += rep_src->start_number - rep_dest->start_number;
         rep_dest->fragments    = rep_src->fragments;
         rep_dest->n_fragments  = rep_src->n_fragments;
-        rep_dest->parent  = rep_src->parent;
+        //rep_dest->parent  = rep_src->parent;
         rep_dest->last_seq_no = calc_max_seg_no(rep_dest, c);
         rep_src->fragments = NULL;
         rep_src->n_fragments = 0;
@@ -1484,8 +1486,10 @@ static struct fragment *get_current_fragment(struct representation *pls)
     struct fragment *seg = NULL;
     struct fragment *seg_ptr = NULL;
 
-    if (!pls->parent)
+    if (!pls->parent) {
+        av_log(NULL, AV_LOG_ERROR, "%s: pls->parent == NULL !\n", __func__);
         return NULL;
+    }
     DASHContext *c = pls->parent->priv_data;
 
     while (( !ff_check_interrupt(c->interrupt_callback)&& pls->n_fragments > 0)) {
@@ -1683,8 +1687,10 @@ static int read_data(void *opaque, uint8_t *buf, int buf_size)
 {
     int ret = 0;
     struct representation *v = opaque;
-    if (!v->parent)
+    if (!v->parent) {
+        av_log(NULL, AV_LOG_ERROR, "%s: pls->parent == NULL !\n", __func__);
         return AVERROR_EOF;
+    }
     DASHContext *c = v->parent->priv_data;
 
 restart:
@@ -1894,6 +1900,7 @@ static int open_demux_for_component(AVFormatContext *s, struct representation *p
 
     if (!pls->parent) {
         ret = AVERROR_EOF;
+        av_log(NULL, AV_LOG_ERROR, "%s: pls->parent == NULL !\n", __func__);
         goto fail;
     }
     if (!pls->last_seq_no) {
