@@ -1286,7 +1286,12 @@ cleanup:
 
     if (c->vst < 0) {
         c->vst = 0;
+        s->demuxer_status_code = IJK_DEMUXER_STATUS_DASH_VID_MISMATCH;
         av_log(NULL, AV_LOG_ERROR, "no video stream id found, use first video stream\n");
+        int i = 0;
+        for (i = 0; i < c->n_videos; i++) {
+            av_log(NULL, AV_LOG_ERROR, "rep %d id = %s\n", c->videos[i]->id);
+        }
     }
 
     av_free(new_url);

@@ -1937,6 +1937,20 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    /**
+     * Ijk: AVFormat status code.
+     * Values:
+     *  0:  no error;
+     *  -1: failed when opening input file in quick-parsing mode;
+     *  -2: failed when playing in quick-parsing mode;
+     *  -3: failed when search dash vid;
+     */
+#define IJK_DEMUXER_STATUS_OPEN_FAIL -1
+#define IJK_DEMUXER_STATUS_PLAY_FAIL -2
+#define IJK_DEMUXER_STATUS_DASH_VID_MISMATCH -3
+    int demuxer_status_code;
+
 } AVFormatContext;
 
 #if FF_API_FORMAT_GET_SET
