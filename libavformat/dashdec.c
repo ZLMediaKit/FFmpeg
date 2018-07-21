@@ -35,7 +35,6 @@ struct fragment {
     int64_t url_offset;
     int64_t size;
     char *url;
-    AVAppIOControl  app_io_ctrl;
     AVApplicationContext *app_ctx;
     int64_t         app_ctx_intptr;
     struct representation * pls;
@@ -1527,8 +1526,9 @@ static int func_on_app_event(AVApplicationContext *h, int event_type ,void *obj,
         case AVAPP_CTRL_WILL_HTTP_OPEN:
             dash_call_inject(s);
             refresh_manifest(s);
-            memcpy(&seg->app_io_ctrl, &c->app_io_ctrl, sizeof(AVAppIOControl));
-            break;
+            AVAppIOControl *ctl =  (AVAppIOControl *) (intptr_t)obj;
+            ctl->is_handled = 1;
+            return 0;
         default:
             break;
     }
