@@ -20,6 +20,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include <libxml/parser.h>
+#include "libavutil/application.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
@@ -34,6 +35,10 @@ struct fragment {
     int64_t url_offset;
     int64_t size;
     char *url;
+    AVAppIOControl  app_io_ctrl;
+    AVApplicationContext *app_ctx;
+    int64_t         app_ctx_intptr;
+    struct representation * pls;
 };
 
 /*
@@ -154,7 +159,14 @@ typedef struct DASHContext {
     int vst;
     char * aid;
     char * vid;
+    AVAppIOControl  app_io_ctrl;
+    AVApplicationContext *app_ctx;
+    int64_t         app_ctx_intptr;
 } DASHContext;
+
+
+
+
 
 static int ishttp(char *url)
 {
@@ -311,6 +323,7 @@ static void free_fragment(struct fragment **seg)
         return;
     }
     av_freep(&(*seg)->url);
+    av_application_closep(&(*seg)->app_ctx);
     av_freep(seg);
 }
 
@@ -350,6 +363,7 @@ static void free_representation(struct representation *pls)
         pls->ctx->pb = NULL;
         avformat_close_input(&pls->ctx);
     }
+
 
     av_freep(&pls->url_template);
     av_freep(&pls);
@@ -1290,7 +1304,7 @@ cleanup:
         av_log(NULL, AV_LOG_ERROR, "no video stream id found, use first video stream\n");
         int i = 0;
         for (i = 0; i < c->n_videos; i++) {
-            av_log(NULL, AV_LOG_ERROR, "rep %d id = %s\n", c->videos[i]->id);
+            av_log(NULL, AV_LOG_ERROR, "rep %d id = %s\n", i, c->videos[i]->id);
         }
     }
 
@@ -1484,6 +1498,43 @@ finish:
     return ret;
 }
 
+static int dash_call_inject(AVFormatContext *s)
+{
+    DASHContext *c = s->priv_data;
+    int ret = 0;
+    if (c->app_ctx) {
+        AVAppIOControl control_data_backup = c->app_io_ctrl;
+
+        c->app_io_ctrl.is_handled = 0;
+        c->app_io_ctrl.is_url_changed = 0;
+        ret = av_application_on_io_control(c->app_ctx, AVAPP_CTRL_WILL_FILE_OPEN, &c->app_io_ctrl);
+        if (ret || !c->app_io_ctrl.is_handled) {
+            ret = AVERROR_EXIT;
+            goto fail;
+        }
+    }
+fail:
+    return ret;
+}
+
+static int func_on_app_event(AVApplicationContext *h, int event_type ,void *obj, size_t size) {
+    struct fragment * seg = h->opaque;
+    AVFormatContext *s = seg->pls->parent;
+    DASHContext *c = s->priv_data;
+    int ret = 0;
+
+    switch (event_type) {
+        case AVAPP_CTRL_WILL_HTTP_OPEN:
+            dash_call_inject(s);
+            refresh_manifest(s);
+            memcpy(&seg->app_io_ctrl, &c->app_io_ctrl, sizeof(AVAppIOControl));
+            break;
+        default:
+            break;
+    }
+    return c->app_ctx->func_on_app_event(c->app_ctx, event_type, obj, size);
+}
+
 static struct fragment *get_current_fragment(struct representation *pls)
 {
     int64_t min_seq_no = 0;
@@ -1593,6 +1644,7 @@ static int read_from_url(struct representation *pls, struct fragment *seg,
     return ret;
 }
 
+
 static int open_input(DASHContext *c, struct representation *pls, struct fragment *seg)
 {
     AVDictionary *opts = NULL;
@@ -1603,6 +1655,9 @@ static int open_input(DASHContext *c, struct representation *pls, struct fragmen
     if (!url) {
         goto cleanup;
     }
+
+
+
     set_httpheader_options(c, &opts);
     if (seg->size >= 0) {
         /* try to restrict the HTTP request to the part we want
@@ -1612,6 +1667,19 @@ static int open_input(DASHContext *c, struct representation *pls, struct fragmen
     }
 
     ff_make_absolute_url(url, c->max_url_size, c->base_url, seg->url);
+
+
+    av_application_open(&seg->app_ctx, seg);
+    seg->pls = pls;
+    seg->app_ctx->func_on_app_event = func_on_app_event;
+    seg->app_ctx_intptr = (int64_t)(intptr_t)(seg->app_ctx);
+    char * io_url = av_mallocz(c->max_url_size);
+    strcpy(io_url, "ijkhttphook:");
+    av_strlcat(io_url, url, c->max_url_size);
+    av_freep(&url);
+    url =  av_strdup(io_url);
+    av_freep(&io_url);
+    av_dict_set_int(&c->avio_opts, "ijkapplication", seg->app_ctx_intptr, 0);
 
     av_log(pls->parent, AV_LOG_VERBOSE, "DASH request for url '%s', offset %"PRId64", playlist %d\n",
            url, seg->url_offset, pls->rep_idx);
@@ -1941,12 +2009,18 @@ static int dash_read_header(AVFormatContext *s)
     int stream_index = 0;
     int i;
 
+    c->app_ctx = (AVApplicationContext *)(intptr_t)c->app_ctx_intptr;
+    c->app_io_ctrl.size = sizeof(c->app_io_ctrl);
+    c->app_io_ctrl.segment_index = 0;
+    c->app_io_ctrl.retry_counter = 0;
+
     c->interrupt_callback = &s->interrupt_callback;
     // if the URL context is good, read important options we must broker later
     if (u) {
         update_options(&c->user_agent, "user-agent", u);
         update_options(&c->cookies, "cookies", u);
         update_options(&c->headers, "headers", u);
+        update_options(&c->http_proxy, "http_proxy", u);
     }
 
     if ((ret = parse_manifest(s, s->filename, s->pb)) < 0)
@@ -2099,6 +2173,7 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
             pkt->stream_index = cur->stream_index;
             return 0;
         }
+
         if (cur->is_restart_needed) {
             cur->cur_seg_offset = 0;
             cur->init_sec_buf_read_offset = 0;
@@ -2107,11 +2182,9 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
             ret = reopen_demux_for_component(s, cur);
             cur->is_restart_needed = 0;
         }
-        //when error occur try to renew mpd
-        if (refresh_manifest(s) < 0) {
-            av_log(NULL, AV_LOG_INFO, "Failed to reload mpd\n");
-        }
+
     }
+
     return AVERROR_EOF;
 }
 
@@ -2252,6 +2325,7 @@ static const AVOption dash_options[] = {
     {"vid", "video stream id", OFFSET(vid), AV_OPT_TYPE_STRING, {.str = NULL}, INT_MIN, INT_MAX, FLAGS},
     {"ast", "audio stream index", OFFSET(ast), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
     {"vst", "video stream index", OFFSET(vst), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
+    { "dashapplication", "AVApplicationContext", OFFSET(app_ctx_intptr), AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, FLAGS},
     {NULL}
 };
 
