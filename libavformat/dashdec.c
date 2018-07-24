@@ -1933,7 +1933,7 @@ static int reopen_demux_for_component(AVFormatContext *s, struct representation 
     } else {
         ffio_init_context(&pls->pb, avio_ctx_buffer , INITIAL_BUFFER_SIZE, 0, pls, read_data, NULL, seek_data);
     }
-    pls->pb.seekable = 0;
+    pls->pb.seekable = 1;
 
     if ((ret = ff_copy_whiteblacklists(pls->ctx, s)) < 0)
         goto fail;
