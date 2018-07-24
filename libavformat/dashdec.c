@@ -714,6 +714,11 @@ static int parse_manifest_segmenttimeline(AVFormatContext *s, struct representat
     return 0;
 }
 
+static void xmlNodeSetContentRaw(xmlNodePtr cur, const xmlChar * content) {
+    xmlNodeSetContent(cur, NULL);
+    xmlNodeAddContent(cur, content);
+}
+
 static int resolve_content_path(AVFormatContext *s, const char *url, int *max_url_size, xmlNodePtr *baseurl_nodes, int n_baseurl_nodes) {
 
     char *tmp_str = NULL;
@@ -778,7 +783,7 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
     root_url = (av_strcasecmp(baseurl, "")) ? baseurl : path;
     av_log(NULL, AV_LOG_INFO, "root url = %s\n", root_url);
     if (node) {
-        xmlNodeAddContent(node, root_url);
+        xmlNodeSetContentRaw(node, root_url);
         updated = 1;
     }
 
@@ -802,7 +807,7 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
             }
             start = (text[0] == token);
             av_strlcat(tmp_str, text + start, tmp_max_url_size);
-            xmlNodeAddContent(baseurl_nodes[i], tmp_str);
+            xmlNodeSetContentRaw(baseurl_nodes[i], tmp_str);
             av_log(NULL, AV_LOG_INFO, "set  baseurl_nodes[%d] url = %s\n", i, tmp_str);
             updated = 1;
             xmlFree(text);
@@ -1507,6 +1512,7 @@ static int dash_call_inject(AVFormatContext *s)
 
         c->app_io_ctrl.is_handled = 0;
         c->app_io_ctrl.is_url_changed = 0;
+        c->app_io_ctrl.retry_counter++;
         ret = av_application_on_io_control(c->app_ctx, AVAPP_CTRL_WILL_FILE_OPEN, &c->app_io_ctrl);
         if (ret || !c->app_io_ctrl.is_handled) {
             ret = AVERROR_EXIT;
@@ -1521,14 +1527,40 @@ static int func_on_app_event(AVApplicationContext *h, int event_type ,void *obj,
     struct fragment * seg = h->opaque;
     AVFormatContext *s = seg->pls->parent;
     DASHContext *c = s->priv_data;
+    AVAppIOControl * app_io_ctrl = (AVAppIOControl*)(intptr_t)(obj);
     int ret = 0;
 
     switch (event_type) {
         case AVAPP_CTRL_WILL_HTTP_OPEN:
-            dash_call_inject(s);
+            if (!obj || !app_io_ctrl || size != sizeof(AVAppIOControl)) {
+                app_io_ctrl->is_handled = 0;
+                av_log(NULL, AV_LOG_ERROR, "%s: null AVAppIOControl\n", __func__);
+                return 0;
+            }
+
+            if (app_io_ctrl->retry_counter < 1) {
+                app_io_ctrl->is_url_changed = 0;
+                app_io_ctrl->is_handled = 1;
+                return 0;
+            }
+
+            if (dash_call_inject(s) < 0) {
+                app_io_ctrl->is_handled = 0;
+                av_log(NULL, AV_LOG_ERROR, "%s: hook AVAppIOControl fail\n", __func__);
+                return 0;
+            }
+
             refresh_manifest(s);
-            memcpy(&seg->app_io_ctrl, &c->app_io_ctrl, sizeof(AVAppIOControl));
-            break;
+
+            if (!seg->url || strlen(seg->url) <= 0) {
+                app_io_ctrl->is_handled = 0;
+                av_log(NULL, AV_LOG_ERROR, "%s: hook url = null fail\n", __func__);
+            } else {
+                memcpy(app_io_ctrl->url, seg->url, sizeof(app_io_ctrl->url));
+                app_io_ctrl->is_url_changed = 1;
+                app_io_ctrl->is_handled = 1;
+            }
+            return 0;
         default:
             break;
     }
@@ -1748,8 +1780,9 @@ static int64_t seek_data(void *opaque, int64_t offset, int whence)
     struct representation *v = opaque;
     if (v->n_fragments && !v->init_sec_data_len) {
         //avio_size not support AVSEEK_SIZE
-        if (whence == AVSEEK_SIZE && v->input && v->input->seek)
+        if (whence == AVSEEK_SIZE && v->input && v->input->seek) {
             return v->input->seek(v->input->opaque, offset, whence);
+        }
         return avio_seek(v->input, offset, whence);
     }
 
@@ -2001,7 +2034,7 @@ fail:
     return ret;
 }
 
-static int dash_read_header(AVFormatContext *s)
+static int dash_read_header(AVFormatContext *s, AVDictionary **options)
 {
     void *u = (s->flags & AVFMT_FLAG_CUSTOM_IO) ? NULL : s->pb;
     DASHContext *c = s->priv_data;
@@ -2015,6 +2048,11 @@ static int dash_read_header(AVFormatContext *s)
     c->app_io_ctrl.retry_counter = 0;
 
     c->interrupt_callback = &s->interrupt_callback;
+
+
+    if (options && *options)
+        av_dict_copy(&c->avio_opts, *options, 0);
+
     // if the URL context is good, read important options we must broker later
     if (u) {
         update_options(&c->user_agent, "user-agent", u);
@@ -2342,7 +2380,7 @@ AVInputFormat ff_dash_demuxer = {
     .priv_class     = &dash_class,
     .priv_data_size = sizeof(DASHContext),
     .read_probe     = dash_probe,
-    .read_header    = dash_read_header,
+    .read_header2   = dash_read_header,
     .read_packet    = dash_read_packet,
     .read_close     = dash_close,
     .read_seek      = dash_read_seek,
