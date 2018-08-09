@@ -159,6 +159,8 @@ typedef struct DASHContext {
     int vst;
     char * aid;
     char * vid;
+    int disable_audio;
+    int disable_video;
     AVAppIOControl  app_io_ctrl;
     AVApplicationContext *app_ctx;
     int64_t         app_ctx_intptr;
@@ -2134,7 +2136,7 @@ static int dash_read_header(AVFormatContext *s, AVDictionary **options)
     /* Open the demuxer for video and audio components if available */
     for (i = 0; i < c->n_videos; i++) {
         struct representation *cur_video = c->videos[i];
-        if (c->vst >= 0 && i != c->vst) {
+        if ((c->vst >= 0 && i != c->vst) || (c->disable_video)) {
             ret = open_dummy_for_component(s, cur_video);
         } else {
             ret = open_demux_for_component(s, cur_video);
@@ -2145,9 +2147,10 @@ static int dash_read_header(AVFormatContext *s, AVDictionary **options)
         ++stream_index;
     }
 
+
     for (i = 0; i < c->n_audios; i++) {
         struct representation *cur_audio = c->audios[i];
-        if (c->ast >= 0 && i != c->ast) {
+        if ((c->ast >= 0 && i != c->ast) || (c->disable_audio)) {
             ret = open_dummy_for_component(s, cur_audio);
         } else {
             ret = open_demux_for_component(s, cur_audio);
@@ -2228,6 +2231,46 @@ static void recheck_discard_flags(AVFormatContext *s, struct representation **p,
         }
     }
 }
+extern int dash_switch_streams(AVFormatContext *s1 , AVFormatContext *s2);
+int dash_switch_streams(AVFormatContext *s1 , AVFormatContext *s2) {
+    int ret = 0, i;
+    DASHContext *c1 = s1->priv_data;
+    DASHContext *c2 = s2->priv_data;
+
+    // save current context
+    int n_videos = c1->n_videos;
+    struct representation **videos = c1->videos;
+
+    c1->n_videos = c2->n_videos;
+    c1->videos = c2->videos;
+
+    for (i = 0; i < n_videos; i++) {
+        struct representation *cur_video = videos[i];
+        struct representation *ccur_video = c1->videos[i];
+        if (cur_video->timelines) {
+            // calc current time
+            int64_t currentTime = get_segment_start_time_based_on_timeline(cur_video, cur_video->cur_seq_no) / cur_video->fragment_timescale;
+            // update segments
+            ccur_video->cur_seq_no = calc_next_seg_no_from_timelines(ccur_video, currentTime * cur_video->fragment_timescale - 1);
+            if (ccur_video->cur_seq_no >= 0) {
+                move_timelines(ccur_video, cur_video, c1);
+            }
+        }
+        if (cur_video->fragments) {
+            move_segments(ccur_video, cur_video, c1);
+        }
+    }
+
+    if (c1->videos)
+        free_video_list(c1);
+
+    c1->n_videos = n_videos;
+    c1->videos = videos;
+    c2->n_videos = 0;
+    c2->videos = NULL;
+    ff_read_frame_flush(s1);
+    return ret;
+}
 
 static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
 {
@@ -2248,6 +2291,7 @@ static int dash_read_packet(AVFormatContext *s, AVPacket *pkt)
             mints = pls->cur_timestamp;
         }
     }
+
     for (i = 0; i < c->n_audios; i++) {
         struct representation *pls = c->audios[i];
         if (!pls->ctx)
@@ -2421,6 +2465,8 @@ static const AVOption dash_options[] = {
     {"vid", "video stream id", OFFSET(vid), AV_OPT_TYPE_STRING, {.str = NULL}, INT_MIN, INT_MAX, FLAGS},
     {"ast", "audio stream index", OFFSET(ast), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
     {"vst", "video stream index", OFFSET(vst), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
+    {"disable_video", "disable_video", OFFSET(disable_video), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
+    {"disable_audio", "disable_audio", OFFSET(disable_audio), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     { "dashapplication", "AVApplicationContext", OFFSET(app_ctx_intptr), AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, FLAGS},
     {NULL}
 };

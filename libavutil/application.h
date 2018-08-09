@@ -41,6 +41,13 @@
 #define AVAPP_CTRL_WILL_CONCAT_SEGMENT_OPEN 0x20007 //AVAppIOControl
 #define AVAPP_CTRL_WILL_FILE_OPEN 0x20009 //AVAppIOControl
 
+
+#define AVAPP_SWITCH_CTRL_START       0x30000
+#define AVAPP_SWITCH_CTRL_CHECK       0x30001
+#define AVAPP_SWITCH_CTRL_FAIL        0x30002
+#define AVAPP_SWITCH_CTRL_RETRY       0x30003
+#define AVAPP_SWITCH_CTRL_SUCCESS     0x30004
+
 typedef struct AVAppIOControl {
     size_t  size;
     char    url[4096];      /* in, out */
@@ -89,6 +96,22 @@ typedef struct AVAppIOTraffic
     int     bytes;
 } AVAppIOTraffic;
 
+
+typedef struct AVAppSwitchControl{
+    int    start_switch;
+    char * vid;
+    char * aid;
+
+    int64_t switch_sap;
+    int64_t current_sap;
+    int64_t current_sap1;
+    int64_t next_sap;
+
+    void * switch_mtx_ptr;
+    int retry_counter;
+
+} AVAppSwitchControl;
+
 typedef struct AVApplicationContext AVApplicationContext;
 struct AVApplicationContext {
     const AVClass *av_class;    /**< information for av_log(). Set by av_application_open(). */
@@ -110,6 +133,7 @@ void av_application_did_http_seek(AVApplicationContext *h, void *obj, const char
 
 void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int bytes);
 
+int  av_application_on_switch_control(AVApplicationContext *h, int event_type, AVAppSwitchControl *control);
 int  av_application_on_io_control(AVApplicationContext *h, int event_type, AVAppIOControl *control);
 
 int av_application_on_tcp_will_open(AVApplicationContext *h);

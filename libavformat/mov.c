@@ -4822,6 +4822,10 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (prev_dts >= dts)
             index_entry_flags |= AVINDEX_DISCARD_FRAME;
 
+        if (i == 0) {
+            index_entry_flags |= AVINDEX_SAP;
+        }
+
         st->index_entries[index_entry_pos].pos = offset;
         st->index_entries[index_entry_pos].timestamp = dts;
         st->index_entries[index_entry_pos].size= sample_size;
@@ -7154,6 +7158,9 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (sample->flags & AVINDEX_DISCARD_FRAME) {
         pkt->flags |= AV_PKT_FLAG_DISCARD;
     }
+    if (sample->flags & AVINDEX_SAP) {
+        pkt->flags |= AV_PKT_FLAG_SAP;
+    }
     if (sc->ctts_data && sc->ctts_index < sc->ctts_count) {
         pkt->pts = pkt->dts + sc->dts_shift + sc->ctts_data[sc->ctts_index].duration;
         /* update ctts context */
@@ -7206,6 +7213,21 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         ret = cenc_filter(mov, sc, current_index, pkt->data, pkt->size);
         if (ret) {
             return ret;
+        }
+    }
+    pkt->current_sap = AV_NOPTS_VALUE;
+    pkt->next_sap    = AV_NOPTS_VALUE;
+    if (mov && sc->has_sidx) {
+        int64_t search_index = search_frag_timestamp(&mov->frag_index, st, pkt->dts + sc->time_offset);
+        if (search_index >= 0 && search_index < mov->frag_index.nb_items) {
+            pkt->current_sap = get_frag_time(&mov->frag_index, search_index, st->id);
+            pkt->current_sap = av_rescale_q(pkt->current_sap, st->time_base, AV_TIME_BASE_Q);
+            if (search_index + 1 < mov->frag_index.nb_items) {
+                pkt->next_sap = get_frag_time(&mov->frag_index, search_index + 1, st->id);
+                pkt->next_sap = av_rescale_q(pkt->next_sap, st->time_base, AV_TIME_BASE_Q);
+            }
+        } else {
+            av_log(NULL, AV_LOG_ERROR, "search_frag_timestamp fail! stream %d pkt->dts = %lld\n", st->index, pkt->dts);
         }
     }
 

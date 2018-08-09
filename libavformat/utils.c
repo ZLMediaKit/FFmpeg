@@ -1774,6 +1774,27 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return ret;
 }
 
+extern int av_try_read_frame(AVFormatContext *s, int * nb_packets);
+int av_try_read_frame(AVFormatContext *s, int * nb_packets) {
+    int ret = 0;
+    AVPacket pkt1;
+    AVPacket *pkt = &pkt1;
+    for (;;) {
+        ret = read_frame_internal(s, pkt);
+        if (ret == AVERROR(EAGAIN))
+            continue;
+        if (ret < 0)
+            return ret;
+        ret = ff_packet_list_put(&s->internal->packet_buffer,
+                                 &s->internal->packet_buffer_end,
+                                 pkt, FF_PACKETLIST_FLAG_REF_PACKET);
+        (*nb_packets)++;
+        av_packet_unref(pkt);
+        if (ret < 0)
+            return ret;
+        return 0;
+    }
+}
 int av_read_frame(AVFormatContext *s, AVPacket *pkt)
 {
     const int genpts = s->flags & AVFMT_FLAG_GENPTS;
