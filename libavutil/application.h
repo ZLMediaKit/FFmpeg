@@ -42,11 +42,38 @@
 #define AVAPP_CTRL_WILL_FILE_OPEN 0x20009 //AVAppIOControl
 
 
-#define AVAPP_SWITCH_CTRL_START       0x30000
-#define AVAPP_SWITCH_CTRL_CHECK       0x30001
-#define AVAPP_SWITCH_CTRL_FAIL        0x30002
-#define AVAPP_SWITCH_CTRL_RETRY       0x30003
-#define AVAPP_SWITCH_CTRL_SUCCESS     0x30004
+#define AVAPP_SWITCH_CTRL_START       0x40000
+#define AVAPP_SWITCH_CTRL_CHECK       0x40001
+#define AVAPP_SWITCH_CTRL_FAIL        0x40002
+#define AVAPP_SWITCH_CTRL_RETRY       0x40003
+#define AVAPP_SWITCH_CTRL_SUCCESS     0x40004
+
+#define AVAPP_CTRL_GET_DASH_STREAM_INFO 0x30001
+#define AVAPP_CTRL_SET_DASH_VIDEO_STREAM 0x30002
+#define AVAPP_EVENT_WILL_DASH_VIDEO_STREAM_CHANGE 0x30004
+#define AVAPP_EVENT_DID_DASH_VIDEO_STREAM_CHANGE 0x30005
+
+typedef struct AVAppDashStream
+{
+    int audio_stream_nb;
+    int video_stream_nb;
+    char video_id[20][20];
+    char audio_id[20][20];
+    char cur_video_id[20];
+    char cur_audio_id[20];
+} AVAppDashStream;
+
+typedef struct AVAppDashChange
+{
+    char cur_video_id[20];
+    char next_video_id[20];
+    int64_t next_video_pts;
+    int next_width;
+    int next_height;
+    int error;
+    int retry;
+} AVAppDashChange;
+
 
 typedef struct AVAppIOControl {
     size_t  size;
@@ -96,20 +123,42 @@ typedef struct AVAppIOTraffic
     int     bytes;
 } AVAppIOTraffic;
 
+typedef struct AVAppDashChangeInfo
+{
+    char cur_video_id[20];  // 当前播放的video的id
+    char next_video_id[20];  // 即将切换到的video的id
+    int64_t next_video_pts;
+    int next_width;
+    int next_height;
+    int error;
+    int retry;
+} AVAppDashChangeInfo;
 
 typedef struct AVAppSwitchControl{
     int    start_switch;
+    int    cancel_switch;
     char * vid;
     char * aid;
 
+    enum {
+        SWITCH_NONE,
+        SWITCH_PREPARE,
+        SWITCH_BUFFER_START,
+        SWITCH_BUFFER_END,
+        SWITCH_EXTRADATA,
+    } switch_state;
+    
+    int64_t latest_pts;
     int64_t switch_sap;
     int64_t current_sap;
     int64_t current_sap1;
     int64_t next_sap;
+    int64_t max_differ;
 
     void * switch_mtx_ptr;
     int retry_counter;
 
+    AVAppDashChange change_info;
 } AVAppSwitchControl;
 
 typedef struct AVApplicationContext AVApplicationContext;
@@ -118,6 +167,7 @@ struct AVApplicationContext {
     void *opaque;               /**< user data. */
 
     int (*func_on_app_event)(AVApplicationContext *h, int event_type ,void *obj, size_t size);
+    int (*func_app_ctrl)(int what, int64_t arg0, void *obj, size_t size);
 };
 
 int  av_application_alloc(AVApplicationContext **ph, void *opaque);
@@ -134,6 +184,7 @@ void av_application_did_http_seek(AVApplicationContext *h, void *obj, const char
 void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int bytes);
 
 int  av_application_on_switch_control(AVApplicationContext *h, int event_type, AVAppSwitchControl *control);
+
 int  av_application_on_io_control(AVApplicationContext *h, int event_type, AVAppIOControl *control);
 
 int av_application_on_tcp_will_open(AVApplicationContext *h);
@@ -141,6 +192,8 @@ int av_application_on_tcp_did_open(AVApplicationContext *h, int error, int fd, A
 
 void av_application_on_async_statistic(AVApplicationContext *h, AVAppAsyncStatistic *statistic);
 void av_application_on_async_read_speed(AVApplicationContext *h, AVAppAsyncReadSpeed *speed);
+
+void av_application_on_dash_info(AVApplicationContext *h, int event_type, AVAppDashChangeInfo *info);
 
 
 #endif /* AVUTIL_APPLICATION_H */

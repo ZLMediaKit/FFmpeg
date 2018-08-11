@@ -1779,7 +1779,7 @@ int av_try_read_frame(AVFormatContext *s, int * nb_packets) {
     int ret = 0;
     AVPacket pkt1;
     AVPacket *pkt = &pkt1;
-    for (;;) {
+    while(!ff_check_interrupt(&s->interrupt_callback)) {
         ret = read_frame_internal(s, pkt);
         if (ret == AVERROR(EAGAIN))
             continue;
@@ -1794,6 +1794,7 @@ int av_try_read_frame(AVFormatContext *s, int * nb_packets) {
             return ret;
         return 0;
     }
+    return 0;
 }
 int av_read_frame(AVFormatContext *s, AVPacket *pkt)
 {
@@ -2074,7 +2075,51 @@ int av_add_index_entry(AVStream *st, int64_t pos, int64_t timestamp,
                               &st->index_entries_allocated_size, pos,
                               timestamp, size, distance, flags);
 }
-
+//
+//int ff_index_search_sap(const AVIndexEntry *entries, int nb_entries,
+//                        int64_t wanted_sap, int flags) {
+//    int a, b, m;
+//    int64_t timestamp;
+//    int i;
+//    int sap = 0;
+//    
+//    
+//    a = -1;
+//    b = nb_entries;
+//    
+//    // Optimize appending index entries at the end.
+//    if (b && entries[b - 1].sap < wanted_sap)
+//        a = b - 1;
+//    
+//    while (b - a > 1) {
+//        m         = (a + b) >> 1;
+//
+//        // Search for the next non-discarded packet.
+//        while (!(entries[m].flags & AVINDEX_SAP) && m < b && m < nb_entries - 1) {
+//            m++;
+//            if (m == b && entries[m].sap >= wanted_sap) {
+//                m = b - 1;
+//                break;
+//            }
+//        }
+//
+//        sap = entries[m].sap;
+//        if (sap >= wanted_sap)
+//            b = m;
+//        if (sap <= wanted_sap)
+//            a = m;
+//    }
+//    m = (flags & AVSEEK_FLAG_BACKWARD) ? a : b;
+//    
+//    if (!(flags & AVSEEK_FLAG_ANY))
+//        while (m >= 0 && m < nb_entries &&
+//               !(entries[m].flags & AVINDEX_KEYFRAME))
+//            m += (flags & AVSEEK_FLAG_BACKWARD) ? -1 : 1;
+//    
+//    if (m == nb_entries)
+//        return -1;
+//    return m;
+//}
 int ff_index_search_timestamp(const AVIndexEntry *entries, int nb_entries,
                               int64_t wanted_timestamp, int flags)
 {
@@ -2495,6 +2540,7 @@ static int seek_frame_internal(AVFormatContext *s, int stream_index,
     int ret;
     AVStream *st;
 
+
     if (flags & AVSEEK_FLAG_BYTE) {
         if (s->iformat->flags & AVFMT_NO_BYTE_SEEK)
             return -1;
@@ -2506,6 +2552,14 @@ static int seek_frame_internal(AVFormatContext *s, int stream_index,
         stream_index = av_find_default_stream_index(s);
         if (stream_index < 0)
             return -1;
+        
+        if (flags & AVSEEK_FLAG_SAP) {
+            if (s->iformat->read_seek) {
+                ff_read_frame_flush(s);
+                return s->iformat->read_seek(s, stream_index, timestamp, flags);
+            } else
+                return -1;
+        }
 
         st = s->streams[stream_index];
         /* timestamp for default must be expressed in AV_TIME_BASE units */

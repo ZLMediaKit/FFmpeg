@@ -218,3 +218,9 @@ void av_application_did_io_tcp_read(AVApplicationContext *h, void *obj, int byte
 
     av_application_on_io_traffic(h, &event);
 }
+
+void av_application_on_dash_info(AVApplicationContext *h, int event_type, AVAppDashChangeInfo *info) {
+    if (h && h->func_on_app_event)
+        h->func_on_app_event(h, event_type, (void *)info, sizeof(AVAppDashChangeInfo));
+}
+
