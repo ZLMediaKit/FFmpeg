@@ -460,7 +460,11 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
         return AVERROR_INVALIDDATA;
 
     av_freep(pb);
+    int64_t start_pts   = av_gettime();
     ret = avio_open2(pb, url, AVIO_FLAG_READ, c->interrupt_callback, &tmp);
+    int64_t end_pts   = av_gettime();
+    int64_t duration = end_pts - start_pts;
+    av_log(NULL, AV_LOG_INFO, "open_dash:%s, duration = %lld\n", url, duration);
     if (ret >= 0) {
         // update cookies on http response with setcookies.
         char *new_cookies = NULL;
@@ -1792,7 +1796,9 @@ static int open_input(DASHContext *c, struct representation *pls, struct fragmen
 
     av_log(pls->parent, AV_LOG_VERBOSE, "DASH request for url '%s', offset %"PRId64", playlist %d\n",
            url, seg->url_offset, pls->rep_idx);
+
     ret = open_url(pls->parent, &pls->input, url, c->avio_opts, opts, NULL);
+
     if (ret < 0) {
         goto cleanup;
     }

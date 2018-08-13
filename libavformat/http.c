@@ -536,7 +536,7 @@ static int http_open(URLContext *h, const char *uri, int flags,
 {
     HTTPContext *s = h->priv_data;
     int ret;
-
+    int64_t start_pts   = av_gettime();
     s->app_ctx = (AVApplicationContext *)(intptr_t)s->app_ctx_intptr;
 
     if( s->seekable == 1 )
@@ -573,6 +573,10 @@ static int http_open(URLContext *h, const char *uri, int flags,
     av_application_did_http_open(s->app_ctx, (void*)h, uri, ret, s->http_code, s->filesize);
     if (ret < 0)
         av_dict_free(&s->chained_options);
+    int64_t end_pts   = av_gettime();
+    int64_t duration = end_pts - start_pts;
+    av_log(NULL, AV_LOG_INFO, "open_http:%s, duration = %lld\n", uri, duration);
+    return 0;
     return ret;
 }
 

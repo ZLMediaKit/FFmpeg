@@ -352,7 +352,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     char portstr[10];
     AVAppTcpIOControl control = {0};
     DnsCacheEntry *dns_entry = NULL;
-
+    int64_t start_pts   = av_gettime();
     if (s->open_timeout < 0) {
         s->open_timeout = 15000000;
     }
@@ -485,6 +485,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
             goto fail1;
         }
 
+        start_pts   = av_gettime();
         if ((ret = ff_listen_connect(fd, cur_ai->ai_addr, cur_ai->ai_addrlen,
                                      s->open_timeout / 1000, h, !!cur_ai->ai_next)) < 0) {
             if (ret == AVERROR(ETIMEDOUT)) {
@@ -497,6 +498,9 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
             else
                 goto fail;
         } else {
+            int64_t end_pts   = av_gettime();
+            int64_t duration = end_pts - start_pts;
+            av_log(NULL, AV_LOG_INFO, "open_tcp connect:%s, duration = %lld\n", uri, duration);
             ret = av_application_on_tcp_did_open(s->app_ctx, 0, fd, &control);
             if (ret) {
                 av_log(NULL, AV_LOG_WARNING, "terminated by application in AVAPP_CTRL_DID_TCP_OPEN");
@@ -517,6 +521,9 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
     } else {
         freeaddrinfo(ai);
     }
+    int64_t end_pts   = av_gettime();
+    int64_t duration = end_pts - start_pts;
+    av_log(NULL, AV_LOG_INFO, "open_tcp:%s, duration = %lld\n", uri, duration);
     return 0;
 
  fail:
