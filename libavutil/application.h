@@ -135,23 +135,12 @@ typedef struct AVAppDashChangeInfo
 } AVAppDashChangeInfo;
 
 typedef struct AVAppSwitchControl{
-    int    start_switch;
-    int    cancel_switch;
     char * vid;
     char * aid;
 
-    enum {
-        SWITCH_NONE,
-        SWITCH_PREPARE,
-        SWITCH_BUFFER_START,
-        SWITCH_BUFFER_END,
-        SWITCH_EXTRADATA,
-    } switch_state;
-    
     int64_t latest_pts;
     int64_t switch_sap;
     int64_t current_sap;
-    int64_t current_sap1;
     int64_t next_sap;
     int64_t max_differ;
 
@@ -159,6 +148,7 @@ typedef struct AVAppSwitchControl{
     int retry_counter;
 
     AVAppDashChange change_info;
+    int (*start_switch)(void *);
 } AVAppSwitchControl;
 
 typedef struct AVApplicationContext AVApplicationContext;
