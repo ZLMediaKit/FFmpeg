@@ -161,6 +161,7 @@ typedef struct DASHContext {
     char * vid;
     int disable_audio;
     int disable_video;
+    int disable_retry;
     AVAppIOControl  app_io_ctrl;
     AVApplicationContext *app_ctx;
     int64_t         app_ctx_intptr;
@@ -1572,7 +1573,12 @@ static int func_on_app_event(AVApplicationContext *h, int event_type ,void *obj,
                 break;
             }
 
-
+            if (c->disable_retry) {
+                app_io_ctrl->is_url_changed = 0;
+                app_io_ctrl->is_handled = 0;
+                app_io_ctrl->retry_counter = 0;
+                return 0;
+            }
             if (dash_call_inject(s) < 0) {
                 app_io_ctrl->is_handled = 0;
                 av_log(NULL, AV_LOG_ERROR, "%s: hook AVAppIOControl fail\n", __func__);
@@ -2464,6 +2470,7 @@ static const AVOption dash_options[] = {
     {"vid", "video stream id", OFFSET(vid), AV_OPT_TYPE_STRING, {.str = NULL}, INT_MIN, INT_MAX, FLAGS},
     {"ast", "audio stream index", OFFSET(ast), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
     {"vst", "video stream index", OFFSET(vst), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
+    {"disable_retry", "disable_retry", OFFSET(disable_retry), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {"disable_video", "disable_video", OFFSET(disable_video), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {"disable_audio", "disable_audio", OFFSET(disable_audio), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     { "dashapplication", "AVApplicationContext", OFFSET(app_ctx_intptr), AV_OPT_TYPE_INT64, { .i64 = 0 }, INT64_MIN, INT64_MAX, FLAGS},
