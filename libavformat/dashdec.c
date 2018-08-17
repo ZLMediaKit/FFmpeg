@@ -162,6 +162,7 @@ typedef struct DASHContext {
     int disable_audio;
     int disable_video;
     int disable_retry;
+    int disable_xml_release;
     AVAppIOControl  app_io_ctrl;
     AVApplicationContext *app_ctx;
     int64_t         app_ctx_intptr;
@@ -1306,7 +1307,8 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
 cleanup:
         /*free the document */
         xmlFreeDoc(doc);
-        xmlCleanupParser();
+        if (!c->disable_xml_release)
+            xmlCleanupParser();
     }
 
     if (c->ast < 0) {
@@ -2458,6 +2460,10 @@ int64_t dash_frag_get_timestamp_with_index(AVFormatContext *s, int index){
     return AV_NOPTS_VALUE;
 }
 
+extern void dash_xml_release(void);
+void dash_xml_release(void) {
+    xmlCleanupParser();
+}
 
 #define OFFSET(x) offsetof(DASHContext, x)
 #define FLAGS AV_OPT_FLAG_DECODING_PARAM
@@ -2470,6 +2476,7 @@ static const AVOption dash_options[] = {
     {"vid", "video stream id", OFFSET(vid), AV_OPT_TYPE_STRING, {.str = NULL}, INT_MIN, INT_MAX, FLAGS},
     {"ast", "audio stream index", OFFSET(ast), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
     {"vst", "video stream index", OFFSET(vst), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, FLAGS},
+    {"disable_xml_release", "disable_xml_release", OFFSET(disable_xml_release), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {"disable_retry", "disable_retry", OFFSET(disable_retry), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {"disable_video", "disable_video", OFFSET(disable_video), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
     {"disable_audio", "disable_audio", OFFSET(disable_audio), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS},
