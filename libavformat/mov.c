@@ -7266,6 +7266,8 @@ static int mov_seek_sap(AVFormatContext *s, AVStream *st, int index)
 
     if (index < 0)
         index = 0;
+    if (index >= mov->frag_index.nb_items)
+        index = mov->frag_index.nb_items - 1;
     if (!mov->frag_index.item[index].headers_read)
         return mov_switch_root(s, -1, index);
     if (index + 1 < mov->frag_index.nb_items)
