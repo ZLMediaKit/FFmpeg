@@ -22,6 +22,7 @@
 #define AVUTIL_APPLICATION_H
 
 #include "libavutil/log.h"
+#include "libavcodec/avcodec.h"
 
 #define AVAPP_EVENT_WILL_HTTP_OPEN  1 //AVAppHttpEvent
 #define AVAPP_EVENT_DID_HTTP_OPEN   2 //AVAppHttpEvent
@@ -59,19 +60,17 @@ typedef struct AVAppDashStream
 {
     int audio_stream_nb;
     int video_stream_nb;
-    char video_id[20][20];
-    char audio_id[20][20];
-    char cur_video_id[20];
-    char cur_audio_id[20];
+    char video_id[20][MAX_PKT_STREAM_ID_LEN];
+    char audio_id[20][MAX_PKT_STREAM_ID_LEN];
+    char cur_video_id[MAX_PKT_STREAM_ID_LEN];
+    char cur_audio_id[MAX_PKT_STREAM_ID_LEN];
 } AVAppDashStream;
 
 typedef struct AVAppDashChange
 {
-    char cur_video_id[20];
-    char next_video_id[20];
-    int64_t next_video_pts;
-    int next_width;
-    int next_height;
+    char cur_video_id[MAX_PKT_STREAM_ID_LEN];
+    char next_video_id[MAX_PKT_STREAM_ID_LEN];
+    int64_t next_sap;
     int error;
     int retry;
 } AVAppDashChange;
@@ -126,8 +125,8 @@ typedef struct AVAppIOTraffic
 } AVAppIOTraffic;
 
 typedef struct AVAppSwitchControl{
-    char * vid;
-    char * aid;
+    char vid[MAX_PKT_STREAM_ID_LEN];
+    char aid[MAX_PKT_STREAM_ID_LEN];
 
     int64_t latest_pts;
     int64_t switch_sap;
