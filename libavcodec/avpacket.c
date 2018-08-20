@@ -576,6 +576,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     dst->current_sap          = src->current_sap;
     dst->next_sap             = src->next_sap;
     strncpy(dst->stream_id, src->stream_id, MAX_PKT_STREAM_ID_LEN);
+    dst->serial               = src->serial;
 
     for (i = 0; i < src->side_data_elems; i++) {
          enum AVPacketSideDataType type = src->side_data[i].type;

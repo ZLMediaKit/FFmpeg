@@ -132,6 +132,8 @@ typedef struct AVAppSwitchControl{
     int64_t switch_sap;
     int64_t current_sap;
     int64_t next_sap;
+    int current_serial;
+    int next_serial;
     int64_t max_differ;
 
     void * switch_mtx_ptr;
