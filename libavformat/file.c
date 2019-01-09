@@ -76,9 +76,13 @@ typedef struct FileContext {
 #if HAVE_DIRENT_H
     DIR *dir;
 #endif
+    const char *mask_str;
+    int mask_len;
+    int64_t file_offset;
 } FileContext;
 
 static const AVOption file_options[] = {
+    { "mask_str", "mask掩码加密密钥", offsetof(FileContext, mask_str), AV_OPT_TYPE_STRING, { .str = "" }, 0, 0, AV_OPT_FLAG_DECODING_PARAM },
     { "truncate", "truncate existing files on write", offsetof(FileContext, trunc), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { "blocksize", "set I/O operation maximum block size", offsetof(FileContext, blocksize), AV_OPT_TYPE_INT, { .i64 = INT_MAX }, 1, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
     { "follow", "Follow a file as it is being written", offsetof(FileContext, follow), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_DECODING_PARAM },
@@ -110,6 +114,15 @@ static int file_read(URLContext *h, unsigned char *buf, int size)
     int ret;
     size = FFMIN(size, c->blocksize);
     ret = read(c->fd, buf, size);
+    if(ret > 0){
+        if(c->mask_len > 0){
+            unsigned char *ptr = buf;
+            for(int i = 0; i < ret ; ++i,++ptr){
+                *(ptr) ^= c->mask_str[(c->file_offset + i) % c->mask_len];
+            }
+        }
+        c->file_offset += ret;
+    }
     if (ret == 0 && c->follow)
         return AVERROR(EAGAIN);
     if (ret == 0)
@@ -226,6 +239,13 @@ static int file_open(URLContext *h, const char *filename, int flags)
     if (fd == -1)
         return AVERROR(errno);
     c->fd = fd;
+    c->file_offset = 0;
+    c->mask_len = strlen(c->mask_str);
+
+    av_log(c, AV_LOG_ERROR,
+               "mask掩码:%s,长度:%d\n",
+               c->mask_str,
+               c->mask_len);
 
     h->is_streamed = !fstat(fd, &st) && S_ISFIFO(st.st_mode);
 
@@ -250,7 +270,9 @@ static int64_t file_seek(URLContext *h, int64_t pos, int whence)
     }
 
     ret = lseek(c->fd, pos, whence);
-
+    if(ret >= 0){
+        c->file_offset = ret;
+    }
     return ret < 0 ? AVERROR(errno) : ret;
 }
 
