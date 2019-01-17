@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/md5.h"
 #include "libavutil/avstring.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
@@ -79,10 +80,11 @@ typedef struct FileContext {
     const char *mask_str;
     int mask_len;
     int64_t file_offset;
+    int header_offset;
 } FileContext;
 
 static const AVOption file_options[] = {
-    { "mask_str", "mask掩码加密密钥", offsetof(FileContext, mask_str), AV_OPT_TYPE_STRING, { .str = "" }, 0, 0, AV_OPT_FLAG_DECODING_PARAM },
+    { "mask_str", "加密密钥", offsetof(FileContext, mask_str), AV_OPT_TYPE_STRING, { .str = "" }, 0, 0, AV_OPT_FLAG_DECODING_PARAM },
     { "truncate", "truncate existing files on write", offsetof(FileContext, trunc), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { "blocksize", "set I/O operation maximum block size", offsetof(FileContext, blocksize), AV_OPT_TYPE_INT, { .i64 = INT_MAX }, 1, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
     { "follow", "Follow a file as it is being written", offsetof(FileContext, follow), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_DECODING_PARAM },
@@ -115,12 +117,14 @@ static int file_read(URLContext *h, unsigned char *buf, int size)
     size = FFMIN(size, c->blocksize);
     ret = read(c->fd, buf, size);
     if(ret > 0){
+        #if 0
         if(c->mask_len > 0){
             unsigned char *ptr = buf;
             for(int i = 0; i < ret ; ++i,++ptr){
                 *(ptr) ^= c->mask_str[(c->file_offset + i) % c->mask_len];
             }
         }
+        #endif //0
         c->file_offset += ret;
     }
     if (ret == 0 && c->follow)
@@ -212,6 +216,24 @@ static int file_move(URLContext *h_src, URLContext *h_dst)
 
 #if CONFIG_FILE_PROTOCOL
 
+static int check_mask(FileContext *c,const char *buf){
+    uint8_t mask_str_md5[16];
+    av_md5_sum(mask_str_md5,c->mask_str,c->mask_len);
+    
+    char mask_str_md5_str[33];
+    for (int i=0; i < 16; i++){
+        sprintf(mask_str_md5_str+i*2, "%02x", mask_str_md5[i]);
+    }
+    mask_str_md5_str[32] = '\0';
+
+    if(strcmp(mask_str_md5_str,buf)  != 0){
+        av_log(c, AV_LOG_ERROR,"密码不匹配 %s != %s,数据已回滚\r\n",mask_str_md5_str,buf) ;
+        lseek(c->fd,0,SEEK_SET);
+        return -1;
+    }
+    return 0;
+}
+
 static int file_open(URLContext *h, const char *filename, int flags)
 {
     FileContext *c = h->priv_data;
@@ -247,6 +269,49 @@ static int file_open(URLContext *h, const char *filename, int flags)
                c->mask_str,
                c->mask_len);
 
+    if(flags & AVIO_FLAG_READ){
+        c->header_offset = 0;
+        do{
+            char buf[1024];
+            static const char flv_file_header[] = "FLV\x1\x5\x0\x0\x0\x9\x0\x0\x0\x0"; // have audio and have video
+            int totalHeaderLen = sizeof(flv_file_header) - 1 + sizeof(int16_t);
+            {
+                //比对文件头
+                int ret = read(c->fd, buf, totalHeaderLen);
+                if(ret < totalHeaderLen){
+                    av_log(c, AV_LOG_ERROR,"文件长度不够:%d < %d,数据已回滚\r\n" , ret , totalHeaderLen) ;
+                    lseek(c->fd,0,SEEK_SET);
+                    break;
+                }
+                if(memcmp(flv_file_header,buf,sizeof(flv_file_header) - 1) != 0){
+                    av_log(c, AV_LOG_ERROR,"该文件不是已加密的文件,数据已回滚\r\n") ;
+                    lseek(c->fd,0,SEEK_SET);
+                    break;
+                }
+            }
+
+            int16_t mask_len;
+            {
+                //获取mask字符串
+                memcpy(&mask_len,buf + sizeof(flv_file_header) - 1 , sizeof(int16_t));
+                mask_len = ntohs(mask_len);
+                int ret = read(c->fd, buf, mask_len);
+                if(ret != mask_len){
+                    av_log(c, AV_LOG_ERROR,"文件长度不够 %d < %d,数据已回滚\r\n",ret,mask_len) ;
+                    lseek(c->fd,0,SEEK_SET);
+                    break;
+                }
+                buf[mask_len] = '\0';
+            }
+            //校验mask
+            if(check_mask(c,buf) != 0){
+                break;
+            }
+            av_log(c, AV_LOG_ERROR,"文件密码为 %s\r\n",buf) ;
+            c->header_offset = mask_len + totalHeaderLen;
+        }while(0);
+    }
+
     h->is_streamed = !fstat(fd, &st) && S_ISFIFO(st.st_mode);
 
     /* Buffer writes more than the default 32k to improve throughput especially
@@ -266,11 +331,12 @@ static int64_t file_seek(URLContext *h, int64_t pos, int whence)
     if (whence == AVSEEK_SIZE) {
         struct stat st;
         ret = fstat(c->fd, &st);
-        return ret < 0 ? AVERROR(errno) : (S_ISFIFO(st.st_mode) ? 0 : st.st_size);
+        return ret < 0 ? AVERROR(errno) : (S_ISFIFO(st.st_mode) ? 0 : (st.st_size - c->header_offset));
     }
 
-    ret = lseek(c->fd, pos, whence);
+    ret = lseek(c->fd, pos + c->header_offset, whence);
     if(ret >= 0){
+        ret -= c->header_offset;
         c->file_offset = ret;
     }
     return ret < 0 ? AVERROR(errno) : ret;
