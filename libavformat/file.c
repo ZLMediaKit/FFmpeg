@@ -66,6 +66,9 @@
 #  endif
 #endif
 
+static const char mask_token[] = "f887e4e4-9842-418f-8e2f-44e1f031b6cb";
+#define MAX_MASK_BUF_SIZE (256*1024)
+
 /* standard file protocol */
 
 typedef struct FileContext {
@@ -79,8 +82,10 @@ typedef struct FileContext {
 #endif
     const char *mask_str;
     int mask_len;
-    int64_t file_offset;
+    uint64_t file_offset;
     int header_offset;
+    char mask_key[48];
+    int mask_key_len;
 } FileContext;
 
 static const AVOption file_options[] = {
@@ -110,6 +115,13 @@ static const AVClass pipe_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
+static void maskBuffer(uint8_t *in, int in_size, uint8_t *key, int key_size, uint64_t offset) {
+	unsigned char *ptr = in;
+	for (int i = 0; i < in_size; ++i, ++ptr) {
+		*(ptr) ^= key[(offset + i) % key_size];
+	}
+}
+
 static int file_read(URLContext *h, unsigned char *buf, int size)
 {
     FileContext *c = h->priv_data;
@@ -117,14 +129,14 @@ static int file_read(URLContext *h, unsigned char *buf, int size)
     size = FFMIN(size, c->blocksize);
     ret = read(c->fd, buf, size);
     if(ret > 0){
-        #if 0
-        if(c->mask_len > 0){
-            unsigned char *ptr = buf;
-            for(int i = 0; i < ret ; ++i,++ptr){
-                *(ptr) ^= c->mask_str[(c->file_offset + i) % c->mask_len];
-            }
+        if(c->header_offset){
+            //这个是加密的文件
+            if (c->file_offset + ret <= MAX_MASK_BUF_SIZE) {
+				maskBuffer(buf, ret, (uint8_t *)c->mask_key, c->mask_key_len, c->file_offset);
+			}else if(c->file_offset < MAX_MASK_BUF_SIZE) {
+				maskBuffer(buf, MAX_MASK_BUF_SIZE - c->file_offset, (uint8_t *)c->mask_key, c->mask_key_len, c->file_offset);
+			}        
         }
-        #endif //0
         c->file_offset += ret;
     }
     if (ret == 0 && c->follow)
@@ -216,21 +228,33 @@ static int file_move(URLContext *h_src, URLContext *h_dst)
 
 #if CONFIG_FILE_PROTOCOL
 
-static int check_mask(FileContext *c,const char *buf){
+static void getMd5Str(const void *buf,int buf_len, char *mask_str_md5_str){
     uint8_t mask_str_md5[16];
-    av_md5_sum(mask_str_md5,c->mask_str,c->mask_len);
-    
-    char mask_str_md5_str[33];
+    av_md5_sum(mask_str_md5,(uint8_t*)buf,buf_len);
     for (int i=0; i < 16; i++){
         sprintf(mask_str_md5_str+i*2, "%02x", mask_str_md5[i]);
     }
     mask_str_md5_str[32] = '\0';
+}
 
+static void getMaskKey(const char *in,char *out) {
+    char newBuf[256] = {0};
+    strcat(newBuf,in);
+    strcat(newBuf,mask_token);
+    getMd5Str(newBuf,strlen(newBuf),out);
+}
+
+static int check_mask(FileContext *c,const char *buf){
+    char mask_str_md5_str[33];
+    getMd5Str(c->mask_str,c->mask_len,mask_str_md5_str);
     if(strcmp(mask_str_md5_str,buf)  != 0){
         av_log(c, AV_LOG_ERROR,"密码不匹配 %s != %s,数据已回滚\r\n",mask_str_md5_str,buf) ;
         lseek(c->fd,0,SEEK_SET);
         return -1;
     }
+    getMaskKey(mask_str_md5_str,c->mask_key);
+    c->mask_key_len = strlen(c->mask_key);
+    av_log(c, AV_LOG_ERROR,"解密掩码:%s %d\n",c->mask_key,c->mask_key_len);
     return 0;
 }
 
