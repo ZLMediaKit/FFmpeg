@@ -340,7 +340,8 @@ static int file_open(URLContext *h, const char *filename, int flags)
                 lseek(c->fd,0,SEEK_SET);
                 break;
             }
-            c->enc_len = ntohl (*((uint32_t*)buf));
+            uint32_t *ptr = (uint32_t*)buf;
+            c->enc_len = ntohl (*ptr);
             av_log(c, AV_LOG_ERROR,"加密长度为%u\r\n",c->enc_len) ;
 
             c->header_offset = mask_len + totalHeaderLen + 4;
