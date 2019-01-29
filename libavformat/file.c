@@ -66,8 +66,8 @@
 #  endif
 #endif
 
+static const char flv_file_header[] = "FLV\x1\x5\x0\x0\x0\x9\x0\x0\x0\x0";
 static const char mask_token[] = "f887e4e4-9842-418f-8e2f-44e1f031b6cb";
-#define MAX_MASK_BUF_SIZE (256*1024)
 
 /* standard file protocol */
 
@@ -82,10 +82,11 @@ typedef struct FileContext {
 #endif
     const char *mask_str;
     int mask_len;
-    uint64_t file_offset;
     int header_offset;
     char mask_key[48];
     int mask_key_len;
+    uint32_t enc_len;
+    uint32_t enc_offset;
 } FileContext;
 
 static const AVOption file_options[] = {
@@ -131,13 +132,13 @@ static int file_read(URLContext *h, unsigned char *buf, int size)
     if(ret > 0){
         if(c->header_offset){
             //这个是加密的文件
-            if (c->file_offset + ret <= MAX_MASK_BUF_SIZE) {
-				maskBuffer(buf, ret, (uint8_t *)c->mask_key, c->mask_key_len, c->file_offset);
-			}else if(c->file_offset < MAX_MASK_BUF_SIZE) {
-				maskBuffer(buf, MAX_MASK_BUF_SIZE - c->file_offset, (uint8_t *)c->mask_key, c->mask_key_len, c->file_offset);
+            if (c->enc_offset + ret <= c->enc_len) {
+				maskBuffer(buf, ret, (uint8_t *)c->mask_key, c->mask_key_len, c->enc_offset);
+			}else if(c->enc_offset < c->enc_len) {
+				maskBuffer(buf, c->enc_len - c->enc_offset, (uint8_t *)c->mask_key, c->mask_key_len, c->enc_offset);
 			}        
         }
-        c->file_offset += ret;
+        c->enc_offset += ret;
     }
     if (ret == 0 && c->follow)
         return AVERROR(EAGAIN);
@@ -247,6 +248,7 @@ static void getMaskKey(const char *in,char *out) {
 static int check_mask(FileContext *c,const char *buf){
     char mask_str_md5_str[33];
     getMd5Str(c->mask_str,c->mask_len,mask_str_md5_str);
+    getMd5Str(mask_str_md5_str,32,mask_str_md5_str);
     if(strcmp(mask_str_md5_str,buf)  != 0){
         av_log(c, AV_LOG_ERROR,"密码不匹配 %s != %s,数据已回滚\r\n",mask_str_md5_str,buf) ;
         lseek(c->fd,0,SEEK_SET);
@@ -254,7 +256,7 @@ static int check_mask(FileContext *c,const char *buf){
     }
     getMaskKey(mask_str_md5_str,c->mask_key);
     c->mask_key_len = strlen(c->mask_key);
-    av_log(c, AV_LOG_ERROR,"解密掩码:%s %d\n",c->mask_key,c->mask_key_len);
+    // av_log(c, AV_LOG_ERROR,"解密掩码:%s %d\n",c->mask_key,c->mask_key_len);
     return 0;
 }
 
@@ -285,7 +287,7 @@ static int file_open(URLContext *h, const char *filename, int flags)
     if (fd == -1)
         return AVERROR(errno);
     c->fd = fd;
-    c->file_offset = 0;
+    c->enc_offset = 0;
     c->mask_len = strlen(c->mask_str);
 
     av_log(c, AV_LOG_ERROR,
@@ -297,7 +299,6 @@ static int file_open(URLContext *h, const char *filename, int flags)
         c->header_offset = 0;
         do{
             char buf[1024];
-            static const char flv_file_header[] = "FLV\x1\x5\x0\x0\x0\x9\x0\x0\x0\x0"; // have audio and have video
             int totalHeaderLen = sizeof(flv_file_header) - 1 + sizeof(int16_t);
             {
                 //比对文件头
@@ -332,7 +333,17 @@ static int file_open(URLContext *h, const char *filename, int flags)
                 break;
             }
             av_log(c, AV_LOG_ERROR,"文件密码为 %s\r\n",buf) ;
-            c->header_offset = mask_len + totalHeaderLen;
+
+            int ret = read(c->fd, buf, 4);
+            if (ret != 4) {
+                av_log(c, AV_LOG_ERROR,"文件长度不够,无法获取加密长度,数据已回滚:%d\r\n",ret) ;
+                lseek(c->fd,0,SEEK_SET);
+                break;
+            }
+            c->enc_len = ntohl (*((uint32_t*)buf));
+            av_log(c, AV_LOG_ERROR,"加密长度为%u\r\n",c->enc_len) ;
+
+            c->header_offset = mask_len + totalHeaderLen + 4;
         }while(0);
     }
 
@@ -361,7 +372,7 @@ static int64_t file_seek(URLContext *h, int64_t pos, int whence)
     ret = lseek(c->fd, pos + c->header_offset, whence);
     if(ret >= 0){
         ret -= c->header_offset;
-        c->file_offset = ret;
+        c->enc_offset = ret;
     }
     return ret < 0 ? AVERROR(errno) : ret;
 }
