@@ -255,6 +255,35 @@ fail:
     return ret;
 }
 
+static void mediacodec_correct_resolution(AVCodecContext *avctx,
+                                            MediaCodecDecContext *s,
+                                            uint8_t *data,
+                                            size_t size,
+                                            FFAMediaCodecBufferInfo *info,
+                                            AVFrame *frame){
+    if(s->output_buffer_count == 1){
+        size -= info->offset;
+        //点阵数
+        size = size * 2 / 3; 
+        if(s->stride * (s->crop_bottom + 1) != size){
+            //数据量不对
+            if(size % (s->crop_bottom + 1) == 0){
+                //能除尽高，说明stride是错的
+                s->stride = size / (s->crop_bottom + 1);
+                if(s->width > s->stride){
+                    frame->width = s->width = avctx->width = s->stride;
+                }
+                av_log(avctx, AV_LOG_ERROR, "stride修正为%d,width修正为:%d\n",s->stride,frame->width);
+            }else if(size % s->stride == 0){
+                //能除尽stride，说明高是错的
+                s->crop_bottom =  size / s->stride - 1; 
+                s->slice_height = frame->height = s->height = avctx->height = s->crop_bottom + 1 - s->crop_top; 
+                av_log(avctx, AV_LOG_ERROR, "crop_bottom修正为%d,height修正为:%d\n",s->crop_bottom,frame->height);       
+            }
+        }
+    }
+}
+
 static int mediacodec_wrap_sw_buffer(AVCodecContext *avctx,
                                   MediaCodecDecContext *s,
                                   uint8_t *data,
@@ -304,46 +333,24 @@ FF_ENABLE_DEPRECATION_WARNINGS
             s->crop_top, s->crop_bottom, s->crop_left, s->crop_right, s->codec_name,
             frame->linesize[0], frame->linesize[1], frame->linesize[2]);
 
-
-    
-    if(s->output_buffer_count == 1){
-        int old_size = size;
-        size -= info->offset;
-        //点阵数
-        size = size * 2 / 3; 
-        if(s->stride * (s->crop_bottom + 1) != size){
-            //数据量不对
-            if(size % (s->crop_bottom + 1) == 0){
-                //能除尽高，说明stride是错的
-                s->stride = size / (s->crop_bottom + 1);
-                if(s->width > s->stride){
-                    frame->width = s->width = avctx->width = s->stride;
-                }
-                av_log(avctx, AV_LOG_ERROR, "stride修正为%d,width修正为:%d\n",s->stride,frame->width);
-            }else if(size % s->stride == 0){
-                //能除尽stride，说明高是错的
-                s->crop_bottom =  size / s->stride - 1; 
-                s->slice_height = frame->height = s->height = avctx->height = s->crop_bottom + 1 - s->crop_top; 
-                av_log(avctx, AV_LOG_ERROR, "crop_bottom修正为%d,height修正为:%d\n",s->crop_bottom,frame->height);       
-            }
-        }
-        size = old_size;
-    }
-
     switch (s->color_format) {
     case COLOR_FormatYUV420Planar:
+        mediacodec_correct_resolution(avctx,s,data,size,info,frame);
         ff_mediacodec_sw_buffer_copy_yuv420_planar(avctx, s, data, size, info, frame);
         break;
     case COLOR_FormatYUV420SemiPlanar:
     case COLOR_QCOM_FormatYUV420SemiPlanar:
     case COLOR_QCOM_FormatYUV420SemiPlanar32m:
+        mediacodec_correct_resolution(avctx,s,data,size,info,frame);
         ff_mediacodec_sw_buffer_copy_yuv420_semi_planar(avctx, s, data, size, info, frame);
         break;
     case COLOR_TI_FormatYUV420PackedSemiPlanar:
     case COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced:
+        mediacodec_correct_resolution(avctx,s,data,size,info,frame);
         ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar(avctx, s, data, size, info, frame);
         break;
     case COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka:
+        mediacodec_correct_resolution(avctx,s,data,size,info,frame);
         ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(avctx, s, data, size, info, frame);
         break;
     default:
