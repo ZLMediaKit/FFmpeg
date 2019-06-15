@@ -304,6 +304,32 @@ FF_ENABLE_DEPRECATION_WARNINGS
             s->crop_top, s->crop_bottom, s->crop_left, s->crop_right, s->codec_name,
             frame->linesize[0], frame->linesize[1], frame->linesize[2]);
 
+
+    
+    if(s->output_buffer_count == 1){
+        int old_size = size;
+        size -= info->offset;
+        //点阵数
+        size = size * 2 / 3; 
+        if(s->stride * (s->crop_bottom + 1) != size){
+            //数据量不对
+            if(size % (s->crop_bottom + 1) == 0){
+                //能除尽高，说明stride是错的
+                s->stride = size / (s->crop_bottom + 1);
+                if(s->width > s->stride){
+                    frame->width = s->width = avctx->width = s->stride;
+                }
+                av_log(avctx, AV_LOG_ERROR, "stride修正为%d,width修正为:%d\n",s->stride,frame->width);
+            }else if(size % s->stride == 0){
+                //能除尽stride，说明高是错的
+                s->crop_bottom =  size / s->stride - 1; 
+                s->slice_height = frame->height = s->height = avctx->height = s->crop_bottom + 1 - s->crop_top; 
+                av_log(avctx, AV_LOG_ERROR, "crop_bottom修正为%d,height修正为:%d\n",s->crop_bottom,frame->height);       
+            }
+        }
+        size = old_size;
+    }
+
     switch (s->color_format) {
     case COLOR_FormatYUV420Planar:
         ff_mediacodec_sw_buffer_copy_yuv420_planar(avctx, s, data, size, info, frame);
