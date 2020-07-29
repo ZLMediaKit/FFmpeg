@@ -36,6 +36,7 @@
 #include "internal.h"
 #include "avio_internal.h"
 #include "flv.h"
+#include "hevc.h"
 
 #define VALIDATE_INDEX_TS_THRESH 2500
 
@@ -233,6 +234,11 @@ static int flv_same_audio_codec(AVCodecParameters *apar, int flags)
     case FLV_CODECID_PCM_ALAW:
         return apar->sample_rate == 8000 &&
                apar->codec_id    == AV_CODEC_ID_PCM_ALAW;
+    case FLV_CODECID_OPUS:
+        return apar->sample_rate == 48000 &&
+               apar->channels == 2 &&
+               apar->bits_per_coded_sample == 16 &&
+               apar->codec_id == AV_CODEC_ID_OPUS ;
     default:
         return apar->codec_tag == (flv_codecid >> FLV_AUDIO_CODECID_OFFSET);
     }
@@ -291,6 +297,12 @@ static void flv_set_audio_codec(AVFormatContext *s, AVStream *astream,
         apar->sample_rate = 8000;
         apar->codec_id    = AV_CODEC_ID_PCM_ALAW;
         break;
+    case FLV_CODECID_OPUS:
+        apar->sample_rate = 48000;
+        apar->channels = 2;
+        apar->bits_per_coded_sample = 16;
+        apar->codec_id = AV_CODEC_ID_OPUS;
+        break;
     default:
         avpriv_request_sample(s, "Audio codec (%x)",
                flv_codecid >> FLV_AUDIO_CODECID_OFFSET);
@@ -318,6 +330,8 @@ static int flv_same_video_codec(AVCodecParameters *vpar, int flags)
         return vpar->codec_id == AV_CODEC_ID_VP6A;
     case FLV_CODECID_H264:
         return vpar->codec_id == AV_CODEC_ID_H264;
+    case FLV_CODECID_HEVC:
+        return vpar->codec_id == AV_CODEC_ID_HEVC;
     default:
         return vpar->codec_tag == flv_codecid;
     }
@@ -366,6 +380,12 @@ static int flv_set_video_codec(AVFormatContext *s, AVStream *vstream,
     case FLV_CODECID_MPEG4:
         par->codec_id = AV_CODEC_ID_MPEG4;
         ret = 3;
+        break;
+
+    case FLV_CODECID_HEVC:
+        par->codec_id = AV_CODEC_ID_HEVC;
+        vstream->need_parsing = AVSTREAM_PARSE_NONE;
+        ret = 3;     // not 4, reading packet type will consume one byte
         break;
     default:
         avpriv_request_sample(s, "Video codec (%x)", flv_codecid);
@@ -1217,7 +1237,8 @@ retry_duration:
 
     if (st->codecpar->codec_id == AV_CODEC_ID_AAC ||
         st->codecpar->codec_id == AV_CODEC_ID_H264 ||
-        st->codecpar->codec_id == AV_CODEC_ID_MPEG4) {
+        st->codecpar->codec_id == AV_CODEC_ID_MPEG4 ||
+        st->codecpar->codec_id == AV_CODEC_ID_HEVC ) {
         int type = avio_r8(s->pb);
         size--;
 
@@ -1226,7 +1247,7 @@ retry_duration:
             goto leave;
         }
 
-        if (st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_MPEG4) {
+        if (st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_MPEG4 || st->codecpar->codec_id == AV_CODEC_ID_HEVC) {
             // sign extension
             int32_t cts = (avio_rb24(s->pb) + 0xff800000) ^ 0xff800000;
             pts = dts + cts;
@@ -1242,7 +1263,7 @@ retry_duration:
             }
         }
         if (type == 0 && (!st->codecpar->extradata || st->codecpar->codec_id == AV_CODEC_ID_AAC ||
-            st->codecpar->codec_id == AV_CODEC_ID_H264)) {
+            st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_HEVC)) {
             AVDictionaryEntry *t;
 
             if (st->codecpar->extradata) {
