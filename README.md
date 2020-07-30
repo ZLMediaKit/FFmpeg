@@ -1,3 +1,6 @@
+## 修改说明
+本分支基于FFmpeg官方2020/7/14的源码修改，主要添加了rtmp对H265/opus的支持，其中H265的支持源自[金山云](https://github.com/ksvc/FFmpeg/wiki), 我只是做了最新FFmpeg代码的适配，rtmp对opus的支持(codec id定义为13)由本人实现，目前我已经测试通过，功能完全正常。
+
 FFmpeg README
 =============
 
