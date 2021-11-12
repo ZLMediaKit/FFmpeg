@@ -98,13 +98,16 @@ static int nvmpi_decode(AVCodecContext *avctx,void *data,int *got_frame, AVPacke
 
 	res=nvmpi_decoder_get_frame(nvmpi_context->ctx,&_nvframe,avctx->flags & AV_CODEC_FLAG_LOW_DELAY);
 
-	if(res<0)
-		return avpkt->size;
+    if (res < 0) {
+        return avpkt->size;
+    }
 
-	if (ff_get_buffer(avctx, frame, 0) < 0) {
-		return AVERROR(ENOMEM);
+    avctx->width = _nvframe.width;
+    avctx->height = _nvframe.height;
 
-	}
+    if (ff_get_buffer(avctx, frame, 0) < 0) {
+        return AVERROR(ENOMEM);
+    }
 
 	linesize[0]=_nvframe.linesize[0];
 	linesize[1]=_nvframe.linesize[1];
@@ -114,7 +117,7 @@ static int nvmpi_decode(AVCodecContext *avctx,void *data,int *got_frame, AVPacke
 	ptrs[1]=_nvframe.payload[1];
 	ptrs[2]=_nvframe.payload[2];
 
- frame->format=avctx->pix_fmt;
+    frame->format=avctx->pix_fmt;
 
 	av_image_copy(frame->data, frame->linesize, (const uint8_t **) ptrs, linesize, avctx->pix_fmt, _nvframe.width,_nvframe.height);
 
@@ -126,8 +129,6 @@ static int nvmpi_decode(AVCodecContext *avctx,void *data,int *got_frame, AVPacke
 
 	avctx->coded_width=_nvframe.width;
 	avctx->coded_height=_nvframe.height;
-	avctx->width=_nvframe.width;
-	avctx->height=_nvframe.height;
 
 	*got_frame = 1;
 
